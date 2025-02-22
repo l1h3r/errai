@@ -68,7 +68,7 @@ impl Slice {
   #[inline]
   pub fn skip(&self, count: usize) -> &Self {
     // SAFETY: index is constrained within the bounds of the slice.
-    unsafe { self.get_unchecked(count.min(self.len() - 1)..) }
+    unsafe { self.get_unchecked(count.min(self.len())..) }
   }
 
   /// Returns a subslice of up to `count` bytes.
