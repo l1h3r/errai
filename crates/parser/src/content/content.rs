@@ -45,93 +45,95 @@ use crate::utils;
 // Content
 // =============================================================================
 
-/// Decoded frame content.
-#[derive(Clone, Hash, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Content<'a> {
-  /// Audio encryption.
-  Aenc(Aenc<'a>),
-  /// Attached picture.
-  Apic(Apic<'a>),
-  /// Audio text.
-  Atxt(Atxt<'a>),
-  /// Chapter.
-  Chap(Chap<'a>),
-  /// Comments.
-  Comm(Comm<'a>),
-  /// Table of contents.
-  Ctoc(Ctoc<'a>),
-  /// Commercial frame.
-  Comr(Comr<'a>),
-  /// Encryption method registration.
-  Encr(Encr<'a>),
-  /// Equalization.
-  Equa(Equa<'a>),
-  /// Event timing codes.
-  Etco(Etco<'a>),
-  /// General encapsulated object.
-  Geob(Geob<'a>),
-  /// Group identification registration.
-  Grid(Grid<'a>),
-  /// Involved people list.
-  Ipls(Ipls<'a>),
-  /// Linked information.
-  Link(Link<'a>),
-  /// Music CD identifier.
-  Mcdi(Mcdi<'a>),
-  /// MPEG location lookup table.
-  Mllt(Mllt<'a>),
-  /// Ownership frame.
-  Owne(Owne<'a>),
-  /// Play counter.
-  Pcnt(Pcnt),
-  /// Popularimeter.
-  Popm(Popm<'a>),
-  /// Position synchronisation frame.
-  Poss(Poss<'a>),
-  /// Private.
-  Priv(Priv<'a>),
-  /// Recommended buffer size.
-  Rbuf(Rbuf),
-  /// Relative volume adjustment (2).
-  Rva2(Rva2<'a>),
-  /// Relative volume adjustment.
-  Rvad(Rvad<'a>),
-  /// Reverb.
-  Rvrb(Rvrb),
-  /// Synchronised lyrics.
-  Sylt(Sylt<'a>),
-  /// Synchronized tempo codes.
-  Sytc(Sytc<'a>),
-  /// Text information.
-  Text(Text<'a>),
-  /// User-defined text information.
-  Txxx(Txxx<'a>),
-  /// Unique file identifier.
-  Ufid(Ufid<'a>),
-  /// Terms of use.
-  User(User<'a>),
-  /// Unsychronised lyrics.
-  Uslt(Uslt<'a>),
-  /// Commercial information.
-  Wcom(Wurl<'a>),
-  /// Copyright/Legal information.
-  Wcop(Wurl<'a>),
-  /// Official audio file webpage.
-  Woaf(Wurl<'a>),
-  /// Official artist/performer webpage.
-  Woar(Wurl<'a>),
-  /// Official audio source webpage.
-  Woas(Wurl<'a>),
-  /// fficial internet radio station homepage.
-  Wors(Wurl<'a>),
-  /// Payment.
-  Wpay(Wurl<'a>),
-  /// Publishers official webpage.
-  Wpub(Wurl<'a>),
-  /// User-defined URL link frame.
-  Wxxx(Wxxx<'a>),
-  /// Unknown frame content.
-  Unkn(Unkn<'a>),
+impl_content! {
+  /// Decoded frame content.
+  #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+  pub enum Content<'a> {
+    /// Audio encryption.
+    Aenc(Aenc<'a>),
+    /// Attached picture.
+    Apic(Apic<'a>),
+    /// Audio text.
+    Atxt(Atxt<'a>),
+    /// Chapter.
+    Chap(Chap<'a>),
+    /// Comments.
+    Comm(Comm<'a>),
+    /// Table of contents.
+    Ctoc(Ctoc<'a>),
+    /// Commercial frame.
+    Comr(Comr<'a>),
+    /// Encryption method registration.
+    Encr(Encr<'a>),
+    /// Equalization.
+    Equa(Equa<'a>),
+    /// Event timing codes.
+    Etco(Etco<'a>),
+    /// General encapsulated object.
+    Geob(Geob<'a>),
+    /// Group identification registration.
+    Grid(Grid<'a>),
+    /// Involved people list.
+    Ipls(Ipls<'a>),
+    /// Linked information.
+    Link(Link<'a>),
+    /// Music CD identifier.
+    Mcdi(Mcdi<'a>),
+    /// MPEG location lookup table.
+    Mllt(Mllt<'a>),
+    /// Ownership frame.
+    Owne(Owne<'a>),
+    /// Play counter.
+    Pcnt(Pcnt),
+    /// Popularimeter.
+    Popm(Popm<'a>),
+    /// Position synchronisation frame.
+    Poss(Poss<'a>),
+    /// Private.
+    Priv(Priv<'a>),
+    /// Recommended buffer size.
+    Rbuf(Rbuf),
+    /// Relative volume adjustment (2).
+    Rva2(Rva2<'a>),
+    /// Relative volume adjustment.
+    Rvad(Rvad<'a>),
+    /// Reverb.
+    Rvrb(Rvrb),
+    /// Synchronised lyrics.
+    Sylt(Sylt<'a>),
+    /// Synchronized tempo codes.
+    Sytc(Sytc<'a>),
+    /// Text information.
+    Text(Text<'a>),
+    /// User-defined text information.
+    Txxx(Txxx<'a>),
+    /// Unique file identifier.
+    Ufid(Ufid<'a>),
+    /// Terms of use.
+    User(User<'a>),
+    /// Unsychronised lyrics.
+    Uslt(Uslt<'a>),
+    /// Commercial information.
+    Wcom(Wurl<'a>),
+    /// Copyright/Legal information.
+    Wcop(Wurl<'a>),
+    /// Official audio file webpage.
+    Woaf(Wurl<'a>),
+    /// Official artist/performer webpage.
+    Woar(Wurl<'a>),
+    /// Official audio source webpage.
+    Woas(Wurl<'a>),
+    /// fficial internet radio station homepage.
+    Wors(Wurl<'a>),
+    /// Payment.
+    Wpay(Wurl<'a>),
+    /// Publishers official webpage.
+    Wpub(Wurl<'a>),
+    /// User-defined URL link frame.
+    Wxxx(Wxxx<'a>),
+    /// Unknown frame content.
+    Unkn(Unkn<'a>),
+  }
 }
 
 impl<'a> Content<'a> {
@@ -331,7 +333,7 @@ impl<'a> Content<'a> {
 
     assert!(decoder.is_empty());
 
-    this
+    Ok(this)
   }
 }
 
@@ -343,13 +345,5 @@ impl Content<'static> {
     let content: Content<'_> = Content::decode(version, name, slice)?;
 
     Ok(content.into_owned())
-  }
-}
-
-impl IntoOwned for Content<'_> {
-  type Owned = Content<'static>;
-
-  fn into_owned(self) -> Self::Owned {
-    panic!("Content::into_owned");
   }
 }

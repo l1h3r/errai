@@ -26,3 +26,40 @@ macro_rules! copy_into_owned {
     )+
   };
 }
+
+macro_rules! impl_content {
+  (
+    $(#[$meta:meta])*
+    pub enum Content<'a> {
+      $($(#[$vmeta:meta])* $variant:ident($inner:ty)),+
+      $(,)?
+    }
+  ) => {
+    $(#[$meta])*
+    pub enum Content<'a> {
+      $(
+        $(#[$vmeta])*
+        $variant($inner)
+      ),+
+    }
+
+    impl ::core::fmt::Debug for Content<'_> {
+      fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        match self {
+          $(Self::$variant(inner) => ::core::fmt::Debug::fmt(inner, f)),+
+        }
+      }
+    }
+
+    impl $crate::traits::IntoOwned for Content<'_> {
+      type Owned = Content<'static>;
+
+      #[inline]
+      fn into_owned(self) -> Self::Owned {
+        match self {
+          $(Self::$variant(inner) => Content::$variant(inner.into_owned())),+
+        }
+      }
+    }
+  };
+}
