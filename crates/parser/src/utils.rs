@@ -101,6 +101,15 @@ pub const fn is_utf8(input: &[u8]) -> bool {
   from_utf8(input).is_ok()
 }
 
+/// Returns `true` if the input bytes are all NULL (0x00).
+pub const fn is_null(mut input: &[u8]) -> bool {
+  while let [0x00, tail @ ..] = input {
+    input = tail;
+  }
+
+  input.is_empty()
+}
+
 // =============================================================================
 // Compression
 // =============================================================================

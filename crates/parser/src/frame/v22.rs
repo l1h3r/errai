@@ -7,6 +7,7 @@ use crate::traits::ReadExt;
 use crate::types::FrameId;
 use crate::types::Slice;
 use crate::types::Version;
+use crate::utils;
 
 // =============================================================================
 // Frame - ID3v2.2
@@ -71,6 +72,11 @@ impl<'a> FrameV2<'a> {
 
   /// Parse an ID3v2.2 frame from the given `slice`.
   pub fn from_slice(slice: &'a Slice) -> Result<Option<Self>> {
+    // Bail immediately if this is a NULL frame.
+    if utils::is_null(slice.take(3).as_ref()) {
+      return Ok(None);
+    }
+
     let mut reader: Cursor<&Slice> = slice.cursor();
 
     let identifier: FrameId<3> = reader.read_array()?.try_into()?;
