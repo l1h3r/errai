@@ -1,3 +1,1 @@
 //! Errai
-
-#![no_std]
