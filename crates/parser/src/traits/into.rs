@@ -1,5 +1,7 @@
 use alloc::borrow::Cow;
 
+use crate::types::FrameId;
+
 // =============================================================================
 // IntoOwned
 // =============================================================================
@@ -11,6 +13,19 @@ pub trait IntoOwned {
 
   /// Create owned data from borrowed data.
   fn into_owned(self) -> Self::Owned;
+}
+
+// =============================================================================
+// Implementations for Crate Types
+// =============================================================================
+
+impl<const S: usize> IntoOwned for FrameId<S> {
+  type Owned = Self;
+
+  #[inline]
+  fn into_owned(self) -> Self::Owned {
+    self
+  }
 }
 
 // =============================================================================
