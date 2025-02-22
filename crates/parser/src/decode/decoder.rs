@@ -171,6 +171,22 @@ impl<'a> Decode<'a> for Cow<'a, Slice> {
   }
 }
 
+impl<'a, T> Decode<'a> for Vec<T>
+where
+  T: Decode<'a>,
+{
+  #[inline]
+  fn decode(decoder: &mut Decoder<'a>) -> Result<Self> {
+    let mut this: Self = Self::new();
+
+    while !decoder.is_empty() {
+      this.push(T::decode(decoder)?);
+    }
+
+    Ok(this)
+  }
+}
+
 macro_rules! impl_integer {
   ($integer:ty) => {
     impl Decode<'_> for $integer {
