@@ -96,6 +96,8 @@ pub enum ErrorKind {
   InvalidFrameId,
   /// Invalid bitflag in frame header.
   InvalidBitFlag,
+  /// Invalid data found in frame.
+  InvalidFrameData,
 }
 
 // =============================================================================

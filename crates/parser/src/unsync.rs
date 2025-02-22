@@ -6,6 +6,10 @@ use std::io::Result;
 
 use crate::traits::ReadExt;
 
+// =============================================================================
+// Unsync Reader
+// =============================================================================
+
 /// Implementation of [`Read`] for ID3 unsynchronisation scheme.
 #[derive(Debug)]
 pub struct Unsync<R> {

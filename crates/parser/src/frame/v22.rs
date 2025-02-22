@@ -1,6 +1,7 @@
 use core::num::NonZeroU32;
 use std::io::Cursor;
 
+use crate::content::Content;
 use crate::error::Result;
 use crate::traits::ReadExt;
 use crate::types::FrameId;
@@ -60,6 +61,12 @@ impl<'a> FrameV2<'a> {
   #[inline]
   pub const fn total_size(&self) -> usize {
     Self::SIZE + self.descriptor() as usize
+  }
+
+  /// Decode the contents of the frame.
+  #[inline]
+  pub fn decode(&self) -> Result<Content<'a>> {
+    Content::decode(Self::VERSION, self.identifier_str(), self.frame_data())
   }
 
   /// Parse an ID3v2.2 frame from the given `slice`.

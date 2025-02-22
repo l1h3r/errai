@@ -2,6 +2,7 @@ use bitflags::bitflags;
 use core::num::NonZeroU32;
 use std::io::Cursor;
 
+use crate::content::Content;
 use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::Result;
@@ -77,6 +78,19 @@ impl<'a> FrameV4<'a> {
   #[inline]
   pub const fn total_size(&self) -> usize {
     Self::SIZE + self.descriptor() as usize
+  }
+
+  /// Decode the contents of the frame.
+  #[inline]
+  pub fn decode(&self) -> Result<Content<'a>> {
+    let name: &str = self.identifier_str();
+    let data: &Slice = self.frame_data();
+
+    if let Some(size) = self.extra_data().dlen() {
+      Content::decode2(Self::VERSION, name, data, size)
+    } else {
+      Content::decode(Self::VERSION, name, data)
+    }
   }
 
   /// Parse an ID3v2.4 frame from the given `slice`.

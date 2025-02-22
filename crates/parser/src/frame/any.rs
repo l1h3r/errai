@@ -2,6 +2,7 @@ use core::fmt::Debug;
 use core::fmt::Formatter;
 use core::fmt::Result as FmtResult;
 
+use crate::content::Content;
 use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::Result;
@@ -104,6 +105,16 @@ impl<'a> DynFrame<'a> {
       Self::V2(inner) => inner.total_size(),
       Self::V3(inner) => inner.total_size(),
       Self::V4(inner) => inner.total_size(),
+    }
+  }
+
+  /// Decode the contents of the frame.
+  #[inline]
+  pub fn decode(&self) -> Result<Content<'a>> {
+    match self {
+      Self::V2(inner) => inner.decode(),
+      Self::V3(inner) => inner.decode(),
+      Self::V4(inner) => inner.decode(),
     }
   }
 

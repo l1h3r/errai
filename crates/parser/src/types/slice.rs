@@ -4,6 +4,7 @@ use core::fmt::Result as FmtResult;
 use core::ops::Index;
 use core::slice::Iter;
 use core::slice::SliceIndex;
+use memchr::memchr;
 use std::io::Cursor;
 
 use crate::types::Bytes;
@@ -81,6 +82,34 @@ impl Slice {
   #[inline]
   pub fn view(&self, start: usize, count: usize) -> &Self {
     self.skip(start).take(count)
+  }
+
+  /// Returns a subslice of self up to the first NUL byte.
+  ///
+  /// Note: Returns the original slice if no NUL byte is found.
+  pub fn until_nul(&self) -> &Self {
+    let Some(index) = memchr(b'\0', &self.inner) else {
+      return self;
+    };
+
+    &self[..index]
+  }
+
+  /// Returns a subslice of self up to the first NUL byte pair.
+  ///
+  /// Note: Returns the original slice if no NUL byte pair is found.
+  pub fn until_nul2(&self) -> &Self {
+    let mut index: usize = 0;
+
+    for chunk in self.inner.chunks_exact(2) {
+      if matches!(chunk, [0x00, 0x00]) {
+        return &self[..index];
+      }
+
+      index += 2;
+    }
+
+    self
   }
 }
 
