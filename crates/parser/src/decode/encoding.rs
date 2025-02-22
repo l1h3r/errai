@@ -59,6 +59,8 @@ impl Decode<'_> for Encoding {
   }
 }
 
+copy_into_owned!(Encoding);
+
 fn decode_latin1(slice: &Slice) -> Cow<'_, str> {
   if utils::is_latin1(slice.as_ref()) {
     // SAFETY: We just checked if the slice was valid LATIN-1

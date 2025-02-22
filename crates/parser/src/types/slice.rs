@@ -21,7 +21,8 @@ pub struct Slice {
 }
 
 impl Slice {
-  pub(crate) const fn new(inner: &[u8]) -> &Self {
+  #[doc(hidden)]
+  pub const fn new(inner: &[u8]) -> &Self {
     // SAFETY: Self is a DST with same representation as inner.
     unsafe { &*(inner as *const [u8] as *const Self) }
   }

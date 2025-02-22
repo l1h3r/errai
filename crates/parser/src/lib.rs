@@ -4,6 +4,12 @@
 
 extern crate alloc;
 
+#[macro_use]
+extern crate derive;
+
+#[macro_use]
+mod macros;
+
 mod decode;
 mod traits;
 mod utils;

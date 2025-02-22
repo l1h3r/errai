@@ -52,13 +52,24 @@ pub const fn decode_u28_unsync(bytes: [u8; 4]) -> u32 {
 // Misc. Integers
 // =============================================================================
 
-/// Decodes an unsigned 24-bit integer from an array of bytes.
+/// Decode an unsigned 24-bit integer from an array of bytes.
 pub const fn decode_u24(bytes: [u8; 3]) -> u32 {
   let mut output: u32 = 0;
   output |= (bytes[0] as u32) << 16;
   output |= (bytes[1] as u32) << 8;
   output |= (bytes[2] as u32) << 0;
   output
+}
+
+/// Decode an unsigned 64-bit integer from a slice of up to 8 bytes.
+pub fn decode_u64_relaxed(input: &Slice) -> u64 {
+  debug_assert!(input.len() < 9);
+
+  let mut output: [u8; 8] = [0; 8];
+
+  output[8 - input.len()..].copy_from_slice(input.as_ref());
+
+  u64::from_be_bytes(output)
 }
 
 // =============================================================================

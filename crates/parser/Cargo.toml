@@ -8,6 +8,7 @@ readme = "README.md"
 [dependencies]
 bitflags = { version = "2.4", default-features = false }
 byteorder = { version = "1.4", default-features = false, features = ["std"] }
+derive = { version = "=0.1", path = "../derive" }
 flate2 = { version = "1.0", default-features = false, features = ["rust_backend"], optional = true }
 memchr = { version = "2.6", default-features = false, features = ["std"] }
 

@@ -52,3 +52,6 @@ where
     Cow::Owned(Cow::into_owned(self))
   }
 }
+
+copy_into_owned!(u8, u16, u32, u64);
+copy_into_owned!(i8, i16, i32, i64);

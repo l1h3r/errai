@@ -2,8 +2,11 @@ use alloc::borrow::Cow;
 use std::io::Cursor;
 
 use crate::decode::Encoding;
+use crate::error::Error;
+use crate::error::ErrorKind;
 use crate::error::Result;
 use crate::traits::ReadExt;
+use crate::types::FrameId;
 use crate::types::Slice;
 
 // =============================================================================
@@ -21,9 +24,15 @@ impl<'a> Decoder<'a> {
   /// Create a new content `Decoder`.
   #[inline]
   pub fn new(input: &'a Slice) -> Self {
+    Self::with_format(input, Encoding::Latin1)
+  }
+
+  /// Create a new content `Decoder` with the given text `format`.
+  #[inline]
+  pub fn with_format(input: &'a Slice, format: Encoding) -> Self {
     Self {
       cursor: Cursor::new(input),
-      format: Encoding::Latin1,
+      format,
     }
   }
 
@@ -55,6 +64,14 @@ impl<'a> Decoder<'a> {
     Encoding::decode(Encoding::Latin1, self)
   }
 
+  /// Returns `true` if the decoder is empty.
+  pub fn is_empty(&self) -> bool {
+    // TODO: Use cursor.is_empty() when stable
+    //
+    // https://github.com/rust-lang/rust/issues/86369
+    self.cursor.position() >= self.cursor.get_ref().len() as u64
+  }
+
   /// Get a slice of the remaining bytes in the decoder.
   #[inline]
   pub fn remaining(&mut self) -> &'a Slice {
@@ -77,7 +94,7 @@ impl<'a> Decoder<'a> {
     self.format = encoding;
   }
 
-  fn step<F>(&mut self, offset: u64, f: F) -> &'a Slice
+  pub(crate) fn step<F>(&mut self, offset: u64, f: F) -> &'a Slice
   where
     F: FnOnce(&Slice) -> &Slice,
   {
@@ -144,3 +161,37 @@ macro_rules! impl_integer {
 
 impl_integer!(u8, u16, u32, u64);
 impl_integer!(i8, i16, i32, i64);
+
+macro_rules! impl_nonzero {
+  ($nonzero:ident) => {
+    impl Decode<'_> for ::core::num::$nonzero {
+      #[inline]
+      fn decode(decoder: &mut Decoder<'_>) -> Result<Self> {
+        decoder
+          .decode()
+          .map(::core::num::$nonzero::new)
+          .transpose()
+          .ok_or_else(|| Error::new(ErrorKind::InvalidFrameData))?
+      }
+    }
+  };
+  ($($nonzero:ident),+) => {
+    $(
+      impl_nonzero!($nonzero);
+    )+
+  };
+}
+
+impl_nonzero!(NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64);
+impl_nonzero!(NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64);
+
+// =============================================================================
+// Implementations for Crate Types
+// =============================================================================
+
+impl<const S: usize> Decode<'_> for FrameId<S> {
+  #[inline]
+  fn decode(decoder: &mut Decoder<'_>) -> Result<Self> {
+    decoder.decode::<[u8; S]>().and_then(Self::try_from)
+  }
+}
