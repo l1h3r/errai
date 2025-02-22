@@ -13,7 +13,7 @@ use syn::parse_quote;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token;
-use syn::token::CustomToken;
+use syn::__private::CustomToken;
 use syn::token::Gt;
 use syn::token::Lt;
 use syn::token::Token;
