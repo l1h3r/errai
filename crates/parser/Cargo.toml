@@ -1,0 +1,10 @@
+[package]
+name = "parser"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[dependencies]
+bitflags = { version = "2.4", default-features = false }
+byteorder = { version = "1.4", default-features = false, features = ["std"] }
