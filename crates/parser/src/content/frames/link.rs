@@ -12,7 +12,6 @@ use crate::types::Slice;
 /// Linked information frame content.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Frame)]
 pub struct Link<'a> {
-  #[frame(copy)]
   frame_identifier: FrameId<3>,
   url: Cow<'a, str>,
   additional_data: Cow<'a, Slice>,

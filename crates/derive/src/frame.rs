@@ -258,7 +258,7 @@ impl FrameField {
   }
 
   fn kind(&self) -> FrameType<'_> {
-    FrameType::new(&self.kind)
+    FrameType::new(&self.kind, self.attr.borrow)
   }
 
   fn info(&self) -> Cow<'_, str> {
@@ -323,14 +323,10 @@ struct FrameIntoOwned<'a>(&'a FrameField);
 
 impl ToTokens for FrameIntoOwned<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let copy: bool = self.0.attr.copy;
     let name: &Ident = self.0.name();
+    let expr: TokenStream = quote!(crate::traits::IntoOwned::into_owned(self.#name));
 
-    if copy {
-      tokens.extend(quote!(self.#name));
-    } else {
-      tokens.extend(quote!(crate::traits::IntoOwned::into_owned(self.#name)));
-    }
+    tokens.extend(expr);
   }
 }
 
@@ -365,7 +361,7 @@ impl ToTokens for FrameAccessor<'_> {
 // =============================================================================
 
 struct FrameFieldAttr {
-  copy: bool,
+  borrow: bool,
   info: Option<String>,
   read: Option<String>,
 }
@@ -374,7 +370,7 @@ impl Parse for FrameFieldAttr {
   fn parse(input: ParseStream<'_>) -> Result<Self> {
     let list: Vec<Attribute> = input.call(Attribute::parse_outer)?;
 
-    let mut copy: bool = false;
+    let mut borrow: bool = false;
     let mut info: Option<String> = None;
     let mut read: Option<String> = None;
 
@@ -393,12 +389,12 @@ impl Parse for FrameFieldAttr {
           let content: LitStr = meta.input.parse()?;
 
           info = Some(content.value());
-        } else if meta.path.is_ident("copy") {
-          if copy {
-            return Err(Error::new(meta.input.span(), "Duplicate `copy` Attribute."));
+        } else if meta.path.is_ident("borrow") {
+          if borrow {
+            return Err(Error::new(meta.input.span(), "Duplicate `borrow` Attribute."));
           }
 
-          copy = true;
+          borrow = true;
         } else if meta.path.is_ident("read") {
           if read.is_some() {
             return Err(Error::new(meta.input.span(), "Duplicate `read` Attribute."));
@@ -419,7 +415,7 @@ impl Parse for FrameFieldAttr {
       })?;
     }
 
-    Ok(Self { copy, info, read })
+    Ok(Self { borrow, info, read })
   }
 }
 
@@ -428,34 +424,46 @@ impl Parse for FrameFieldAttr {
 // =============================================================================
 
 enum FrameType<'a> {
-  Cow(&'a Type),
+  Raw(&'a Type),
   Ref(&'a Type),
+  Vec(&'a Type),
 }
 
 impl<'a> FrameType<'a> {
-  fn new(kind: &'a Type) -> Self {
-    if let Some(kind) = Self::unwrap_cow(kind) {
-      Self::Cow(kind)
-    } else {
+  fn new(kind: &'a Type, borrow: bool) -> Self {
+    if let Some(kind) = Self::parse_inner(kind, "Cow", 2, 1) {
       Self::Ref(kind)
+    } else if let Some(kind) = Self::parse_inner(kind, "Vec", 1, 0) {
+      Self::Vec(kind)
+    } else if borrow {
+      Self::Ref(kind)
+    } else {
+      Self::Raw(kind)
     }
   }
 
   fn accessor(&self, name: &Ident) -> Expr {
     match self {
-      Self::Cow(_) => parse_quote!(::alloc::borrow::Borrow::borrow(&self.#name)),
-      Self::Ref(_) => parse_quote!(self.#name),
+      Self::Raw(_) => parse_quote!(self.#name),
+      Self::Ref(_) => parse_quote!(::alloc::borrow::Borrow::borrow(&self.#name)),
+      Self::Vec(_) => parse_quote!(self.#name.as_slice()),
     }
   }
 
   fn constant(&self) -> Option<Token![const]> {
     match self {
-      Self::Cow(_) => None,
-      Self::Ref(_) => Some(parse_quote!(const)),
+      Self::Raw(_) => Some(parse_quote!(const)),
+      Self::Ref(_) => None,
+      Self::Vec(_) => None,
     }
   }
 
-  fn unwrap_cow(kind: &Type) -> Option<&Type> {
+  fn parse_inner<'b>(
+    kind: &'b Type,
+    name: &'static str,
+    limit: usize,
+    index: usize,
+  ) -> Option<&'b Type> {
     let Type::Path(ref path) = kind else {
       return None;
     };
@@ -466,7 +474,7 @@ impl<'a> FrameType<'a> {
 
     let segment: &PathSegment = &path.path.segments[0];
 
-    if segment.ident != "Cow" {
+    if segment.ident != name {
       return None;
     }
 
@@ -474,11 +482,11 @@ impl<'a> FrameType<'a> {
       return None;
     };
 
-    if arguments.args.len() != 2 {
+    if arguments.args.len() != limit {
       return None;
     }
 
-    let GenericArgument::Type(ref inner) = arguments.args[1] else {
+    let GenericArgument::Type(ref inner) = arguments.args[index] else {
       return None;
     };
 
@@ -489,11 +497,14 @@ impl<'a> FrameType<'a> {
 impl ToTokens for FrameType<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     match self {
-      Self::Cow(inner) => {
-        tokens.extend(quote!(&#inner));
+      Self::Raw(inner) => {
+        inner.to_tokens(tokens);
       }
       Self::Ref(inner) => {
-        inner.to_tokens(tokens);
+        tokens.extend(quote!(&#inner));
+      }
+      Self::Vec(inner) => {
+        tokens.extend(quote!(&[#inner]));
       }
     }
   }
