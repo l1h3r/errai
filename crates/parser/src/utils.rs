@@ -1,5 +1,15 @@
 use core::str::from_utf8;
 
+#[cfg(feature = "zlib")]
+use flate2::read::ZlibDecoder;
+
+use crate::error::Result;
+use crate::types::Bytes;
+use crate::types::Slice;
+
+#[cfg(feature = "zlib")]
+use crate::traits::ReadExt;
+
 // =============================================================================
 // Unsynchronized
 // =============================================================================
@@ -89,4 +99,20 @@ pub const fn is_ascii_digit(mut input: &[u8]) -> bool {
 /// Returns `true` if the input bytes are valid UTF-8.
 pub const fn is_utf8(input: &[u8]) -> bool {
   from_utf8(input).is_ok()
+}
+
+// =============================================================================
+// Compression
+// =============================================================================
+
+#[cfg(feature = "zlib")]
+pub fn decompress(input: &Slice, size: Option<usize>) -> Result<Bytes> {
+  ZlibDecoder::new(input.cursor())
+    .read_all(size)
+    .map_err(Into::into)
+}
+
+#[cfg(not(feature = "zlib"))]
+pub fn decompress(_input: &Slice, _size: Option<usize>) -> Result<Bytes> {
+  panic!("Enable `zlib` feature to use ZLIB decompression.");
 }
