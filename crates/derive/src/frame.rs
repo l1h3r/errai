@@ -3,6 +3,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use quote::ToTokens;
 use std::borrow::Cow;
+use syn::__private::CustomToken;
 use syn::braced;
 use syn::buffer::Cursor;
 use syn::meta::ParseNestedMeta;
@@ -13,7 +14,6 @@ use syn::parse_quote;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token;
-use syn::__private::CustomToken;
 use syn::token::Gt;
 use syn::token::Lt;
 use syn::token::Token;
@@ -77,7 +77,7 @@ impl ToTokens for Frame {
     let object_lifetime: Option<&FrameGenerics> = self.life.as_ref();
     let static_lifetime: Option<FrameGenerics> = object_lifetime.map(FrameGenerics::to_static);
     let decode_lifetime: FrameGenerics = match object_lifetime {
-      Some(ref generics) => generics.duplicate(None),
+      Some(generics) => generics.duplicate(None),
       None => FrameGenerics::new("'_"),
     };
 

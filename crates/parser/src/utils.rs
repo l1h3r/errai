@@ -29,7 +29,7 @@ pub const fn decode_u35_unsync(bytes: [u8; 5]) -> u32 {
   output |= (bytes[1] as u32) << 21;
   output |= (bytes[2] as u32) << 14;
   output |= (bytes[3] as u32) << 7;
-  output |= (bytes[4] as u32) << 0;
+  output |= bytes[4] as u32;
   output
 }
 
@@ -44,7 +44,7 @@ pub const fn decode_u28_unsync(bytes: [u8; 4]) -> u32 {
   output |= (bytes[0] as u32) << 21;
   output |= (bytes[1] as u32) << 14;
   output |= (bytes[2] as u32) << 7;
-  output |= (bytes[3] as u32) << 0;
+  output |= bytes[3] as u32;
   output
 }
 
@@ -57,7 +57,7 @@ pub const fn decode_u24(bytes: [u8; 3]) -> u32 {
   let mut output: u32 = 0;
   output |= (bytes[0] as u32) << 16;
   output |= (bytes[1] as u32) << 8;
-  output |= (bytes[2] as u32) << 0;
+  output |= bytes[2] as u32;
   output
 }
 
