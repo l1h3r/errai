@@ -293,11 +293,6 @@ struct FrameDecoder<'a>(&'a FrameField);
 impl ToTokens for FrameDecoder<'_> {
   fn to_tokens(&self, tokens: &mut TokenStream) {
     match self.0.attr.read.as_deref() {
-      Some("@remaining") => {
-        tokens.extend(quote! {
-          ::alloc::borrow::Cow::Borrowed(decoder.remaining())
-        });
-      }
       Some("@latin1") => {
         tokens.extend(quote! {
           decoder.decode_latin1()?

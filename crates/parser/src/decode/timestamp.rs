@@ -27,3 +27,5 @@ impl Decode<'_> for Timestamp {
     }
   }
 }
+
+copy_into_owned!(Timestamp);

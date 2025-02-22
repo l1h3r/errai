@@ -5,9 +5,11 @@ use crate::decode::Encoding;
 use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::Result;
+use crate::frame::DynFrame;
 use crate::traits::ReadExt;
 use crate::types::FrameId;
 use crate::types::Slice;
+use crate::types::Version;
 
 // =============================================================================
 // Content Decoder
@@ -64,6 +66,25 @@ impl<'a> Decoder<'a> {
     Encoding::decode(Encoding::Latin1, self)
   }
 
+  /// Decode an embedded frame.
+  pub fn decode_frame(&mut self, version: Version) -> Result<Option<DynFrame<'a>>> {
+    let slice: &Slice = self.cursor.get_ref();
+    let index: u64 = self.cursor.position();
+
+    match DynFrame::from_slice(version, slice) {
+      Ok(Some(frame)) => {
+        self.cursor.set_position(index + frame.total_size() as u64);
+        Ok(Some(frame))
+      }
+      Ok(None) => {
+        Ok(None)
+      }
+      Err(error) => {
+        Err(error)
+      }
+    }
+  }
+
   /// Returns `true` if the decoder is empty.
   pub fn is_empty(&self) -> bool {
     // TODO: Use cursor.is_empty() when stable
@@ -96,7 +117,7 @@ impl<'a> Decoder<'a> {
 
   pub(crate) fn step<F>(&mut self, offset: u64, f: F) -> &'a Slice
   where
-    F: FnOnce(&Slice) -> &Slice,
+    F: FnOnce(&'a Slice) -> &'a Slice,
   {
     let slice: &Slice = self.cursor.get_ref();
     let index: u64 = self.cursor.position().min(slice.len() as u64);
@@ -140,6 +161,13 @@ impl<'a> Decode<'a> for Cow<'a, str> {
   #[inline]
   fn decode(decoder: &mut Decoder<'a>) -> Result<Self> {
     decoder.format.decode(decoder)
+  }
+}
+
+impl<'a> Decode<'a> for Cow<'a, Slice> {
+  #[inline]
+  fn decode(decoder: &mut Decoder<'a>) -> Result<Self> {
+    Ok(Cow::Borrowed(decoder.remaining()))
   }
 }
 

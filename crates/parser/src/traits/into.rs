@@ -55,3 +55,17 @@ where
 
 copy_into_owned!(u8, u16, u32, u64);
 copy_into_owned!(i8, i16, i32, i64);
+
+copy_into_owned! {
+  core::num::NonZeroU8,
+  core::num::NonZeroU16,
+  core::num::NonZeroU32,
+  core::num::NonZeroU64
+}
+
+copy_into_owned! {
+  core::num::NonZeroI8,
+  core::num::NonZeroI16,
+  core::num::NonZeroI32,
+  core::num::NonZeroI64
+}
