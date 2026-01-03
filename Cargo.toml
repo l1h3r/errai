@@ -23,3 +23,7 @@ rustdoc-args = [
   "--extern-html-root-url=alloc=https://doc.rust-lang.org",
   "--extern-html-root-url=std=https://doc.rust-lang.org",
 ]
+
+[dependencies]
+bitflags = { version = "2.10", default-features = false }
+dyn-clone = { version = "1.0", default-features = false }
