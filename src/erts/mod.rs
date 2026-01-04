@@ -3,6 +3,7 @@
 mod message;
 mod process;
 mod runtime;
+mod spawn;
 
 pub use self::message::Message;
 pub use self::process::AliasRef;
@@ -13,3 +14,5 @@ pub use self::process::ProcessId;
 pub use self::process::ProcessInfo;
 pub use self::process::TimerRef;
 pub use self::runtime::Runtime;
+pub use self::spawn::SpawnConfig;
+pub use self::spawn::SpawnHandle;

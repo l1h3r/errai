@@ -1,72 +1,56 @@
 use bitflags::bitflags;
-use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::erts::Message;
+use crate::erts::SpawnConfig;
+use crate::erts::SpawnHandle;
 use crate::lang::Atom;
-use crate::lang::DynPid;
+use crate::lang::DynRef;
 use crate::lang::ExitReason;
 use crate::lang::ExternalDest;
 use crate::lang::InternalDest;
 use crate::lang::InternalPid;
 use crate::lang::InternalRef;
-use crate::lang::RawPid;
 use crate::lang::Term;
+
+pub(crate) type ProcessTask = ();
+
+mod process_id;
+mod process_info;
+
+pub use self::process_id::ProcessId;
+pub use self::process_info::ProcessInfo;
 
 // -----------------------------------------------------------------------------
 // @alias - References
 // -----------------------------------------------------------------------------
 
+pub type MonitorRef = DynRef;
+
 pub type AliasRef = InternalRef;
-pub type MonitorRef = InternalRef;
 pub type TimerRef = InternalRef;
 
 // -----------------------------------------------------------------------------
-// @trait - ProcessId
+// @data - Task Globals
 // -----------------------------------------------------------------------------
 
-pub trait ProcessId {
-  /// Returns the raw PID bits.
-  fn bits(&self) -> RawPid;
-
-  /// Returns the name of the node that spawned this PID,
-  /// or `None` if the PID is an internal PID.
-  fn node(&self) -> Option<Atom>;
-
-  /// Converts `self` into a dynamic PID.
-  fn into_dyn(self) -> DynPid;
-
-  /// Returns `true` if the PID is internal (created on this node).
-  #[inline]
-  fn is_internal(&self) -> bool {
-    self.node().is_none()
-  }
-
-  /// Returns `true` if the PID is external (created on another node).
-  #[inline]
-  fn is_external(&self) -> bool {
-    self.node().is_some()
-  }
+tokio::task_local! {
+  static CONTEXT: ProcessTask;
 }
 
 // -----------------------------------------------------------------------------
 // @type - ProcessFlags
+//
+// Somewhat copied from:
+//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process.h#L1632
 // -----------------------------------------------------------------------------
 
 bitflags! {
   #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
   pub struct ProcessFlags: u32 {
-    const TRAP_EXIT = 1 << 1;
+    const TRAP_EXIT  = 1 << 22;
+    const ASYNC_DIST = 1 << 26;
   }
-}
-
-// -----------------------------------------------------------------------------
-// @type - ProcessInfo
-// -----------------------------------------------------------------------------
-
-#[derive(Debug)]
-pub struct ProcessInfo {
-  pub dictionary: HashMap<Atom, Term>,
 }
 
 // -----------------------------------------------------------------------------
@@ -103,7 +87,7 @@ impl Process {
   /// Sleeps the current process for the given `timeout`.
   ///
   /// REF: **N/A**
-  pub fn sleep(timeout: Duration) {
+  pub async fn sleep(timeout: Duration) {
     todo!("sleep/1")
   }
 
@@ -120,14 +104,6 @@ impl Process {
     todo!("alive/1")
   }
 
-  /// Sets the process flag indicated to the specified value. Returns the
-  /// previous value of the flag.
-  ///
-  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_flag/2>
-  pub fn set_flag(flag: ProcessFlags, value: bool) -> bool {
-    todo!("set_flag/2")
-  }
-
   /// Returns the process flags of the calling process.
   ///
   /// REF: **N/A**
@@ -140,6 +116,13 @@ impl Process {
   /// REF: **N/A**
   pub fn set_flags(flags: ProcessFlags) {
     todo!("set_flags/1")
+  }
+
+  /// Sets the process flag indicated to the specified value.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_flag/2>
+  pub fn set_flag(flag: ProcessFlags, value: bool) {
+    todo!("set_flag/2")
   }
 
   /// Returns information about the process identified by `pid`.
@@ -158,55 +141,73 @@ impl Process {
   /// Spawns a new process to handle `future`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#spawn/1>
-  pub fn spawn<T>(future: T) -> InternalPid
+  pub fn spawn<F>(future: F) -> InternalPid
   where
-    T: Future<Output = ()> + Send + 'static,
+    F: Future<Output = ()> + Send + 'static,
   {
-    todo!("spawn/1")
+    let opts: SpawnConfig = SpawnConfig::new();
+    let data: SpawnHandle = Self::spawn_opt(future, opts);
+
+    match data {
+      SpawnHandle::Process(pid) => pid,
+      SpawnHandle::Monitor(_, _) => unreachable!(),
+    }
   }
 
   /// Spawns a new atomically linked process to handle `future`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#spawn_link/1>
-  pub fn spawn_link<T>(future: T) -> InternalPid
+  pub fn spawn_link<F>(future: F) -> InternalPid
   where
-    T: Future<Output = ()> + Send + 'static,
+    F: Future<Output = ()> + Send + 'static,
   {
-    todo!("spawn_link/1")
+    let opts: SpawnConfig = SpawnConfig::new_link();
+    let data: SpawnHandle = Self::spawn_opt(future, opts);
+
+    match data {
+      SpawnHandle::Process(pid) => pid,
+      SpawnHandle::Monitor(_, _) => unreachable!(),
+    }
   }
 
   /// Spawns a new atomically monitored process to handle `future`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#spawn_monitor/1>
-  pub fn spawn_monitor<T>(future: T) -> InternalPid
+  pub fn spawn_monitor<F>(future: F) -> (InternalPid, MonitorRef)
   where
-    T: Future<Output = ()> + Send + 'static,
+    F: Future<Output = ()> + Send + 'static,
   {
-    todo!("spawn_monitor/1")
+    let opts: SpawnConfig = SpawnConfig::new_monitor();
+    let data: SpawnHandle = Self::spawn_opt(future, opts);
+
+    match data {
+      SpawnHandle::Process(_) => unreachable!(),
+      SpawnHandle::Monitor(process, monitor) => (process, monitor),
+    }
+  }
+
+  /// Spawns a new process with the given `options` to handle `future`.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#spawn_opt/2>
+  pub fn spawn_opt<F>(future: F, options: SpawnConfig) -> SpawnHandle
+  where
+    F: Future<Output = ()> + Send + 'static,
+  {
+    todo!()
   }
 
   /// Sends `message` to the given `destination`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#send/2>
   ///
-  /// # Panics
+  /// # Errors
   ///
-  /// Panics with [`ArgumentError`] if the destination is an unregistered name.
-  pub fn send<T>(destination: impl Into<ExternalDest>, message: T)
+  /// Raises [`ArgumentError`] if the destination is an unregistered name.
+  pub fn send<M>(destination: impl Into<ExternalDest>, message: M)
   where
-    T: Send + 'static,
+    M: Send + 'static,
   {
     todo!("send/2")
-  }
-
-  /// Sends `message` to given `destination` after `time` delay.
-  ///
-  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#send_after/3>
-  pub fn send_after<T>(destination: impl Into<InternalDest>, message: T, time: Duration) -> TimerRef
-  where
-    T: Send + 'static,
-  {
-    todo!("send_after/3")
   }
 
   /// Checks if there is a message matching the given type `T` in the mailbox of
@@ -221,7 +222,7 @@ impl Process {
   }
 
   // ---------------------------------------------------------------------------
-  // General API - Links & Monitors
+  // General API - Links, Monitors, Aliases
   // ---------------------------------------------------------------------------
 
   /// Creates a link between the calling process and the given `pid`.
@@ -281,9 +282,36 @@ impl Process {
     todo!("demonitor/1")
   }
 
+  /// Creates a process alias.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#alias/0>
+  pub fn alias(reply: bool) -> AliasRef {
+    todo!("alias/1")
+  }
+
+  /// Explicitly deactivates a process alias.
+  ///
+  /// Returns `true` if `alias` was a currently-active alias for current
+  /// processes, or `false` otherwise.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#unalias/1>
+  pub fn unalias(alias: AliasRef) -> bool {
+    todo!("unalias/1")
+  }
+
   // ---------------------------------------------------------------------------
   // General API - Timers
   // ---------------------------------------------------------------------------
+
+  /// Sends `message` to given `destination` after `time` delay.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#send_after/3>
+  pub fn send_after<T>(destination: impl Into<InternalDest>, message: T, time: Duration) -> TimerRef
+  where
+    T: Send + 'static,
+  {
+    todo!("send_after/3")
+  }
 
   /// Cancels a timer returned by [`Process::send_after`].
   ///
@@ -312,27 +340,6 @@ impl Process {
   }
 
   // ---------------------------------------------------------------------------
-  // General API - Aliases
-  // ---------------------------------------------------------------------------
-
-  /// Creates a process alias.
-  ///
-  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#alias/0>
-  pub fn alias(reply: bool) -> AliasRef {
-    todo!("alias/1")
-  }
-
-  /// Explicitly deactivates a process alias.
-  ///
-  /// Returns `true` if `alias` was a currently-active alias for current
-  /// processes, or `false` otherwise.
-  ///
-  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#unalias/1>
-  pub fn unalias(alias: AliasRef) -> bool {
-    todo!("unalias/1")
-  }
-
-  // ---------------------------------------------------------------------------
   // General API - Local Name Registration
   // ---------------------------------------------------------------------------
 
@@ -340,9 +347,9 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#register/2>
   ///
-  /// # Panics
+  /// # Errors
   ///
-  /// Panics with [`ArgumentError`] in the following cases:
+  /// Raises [`ArgumentError`] in the following cases:
   ///
   /// - The PID is not alive
   /// - The PID is currently registered under a different name
@@ -355,9 +362,9 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#unregister/1>
   ///
-  /// # Panics
+  /// # Errors
   ///
-  /// Panics with [`ArgumentError`] if the name is not registered to any PID.
+  /// Raises [`ArgumentError`] if the name is not registered to any PID.
   pub fn unregister(name: impl Into<Atom>) {
     todo!("unregister/1")
   }

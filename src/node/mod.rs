@@ -140,9 +140,9 @@ impl Node {
   ///
   /// REF: <https://www.erlang.org/doc/apps/kernel/net_kernel.html#start/2>
   ///
-  /// # Panics
+  /// # Errors
   ///
-  /// Panics with [`NodeStartError`] if the node is already running or if any
+  /// Raises [`NodeStartError`] if the node is already running or if any
   /// dependencies fail to start.
   pub fn start(name: Atom, opts: NodeStartOptions) -> InternalPid {
     todo!("start/2")
@@ -154,10 +154,10 @@ impl Node {
   ///
   /// REF: <https://www.erlang.org/doc/apps/kernel/net_kernel.html#stop/0>
   ///
-  /// # Panics
+  /// # Errors
   ///
-  /// Panics with [`NodeStopError`] if the node was not started using
-  /// [`Node::start`] or if the local node is not alive.
+  /// Raises [`NodeStopError`] if the node was not started using [`Node::start`]
+  /// or if the local node is not alive.
   pub fn stop() {
     todo!("stop/0")
   }
@@ -202,9 +202,9 @@ impl Node {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#monitor_node/2>
   ///
-  /// # Panics
+  /// # Errors
   ///
-  /// Panics with [`NodeNotAlive`] if the local node is not alive.
+  /// Raises [`NodeNotAlive`] if the local node is not alive.
   pub fn monitor(node: Atom) {
     todo!("monitor/1")
   }
@@ -213,9 +213,9 @@ impl Node {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#monitor_node/2>
   ///
-  /// # Panics
+  /// # Errors
   ///
-  /// Panics with [`NodeNotAlive`] if the local node is not alive.
+  /// Raises [`NodeNotAlive`] if the local node is not alive.
   pub fn demonitor(node: Atom) {
     todo!("demonitor/1")
   }
@@ -231,9 +231,9 @@ impl Node {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#set_cookie/1>
   ///
-  /// # Panics
+  /// # Errors
   ///
-  /// Panics with [`NodeNotAlive`] if the local node is not alive.
+  /// Raises [`NodeNotAlive`] if the local node is not alive.
   pub fn set_cookie(cookie: Atom) {
     todo!("set_cookie/1")
   }
