@@ -13,12 +13,15 @@ use crate::lang::InternalPid;
 use crate::lang::InternalRef;
 use crate::lang::Term;
 
-pub(crate) type ProcessTask = ();
-
+mod process_data;
 mod process_dict;
 mod process_id;
 mod process_info;
 
+pub(crate) use self::process_data::ProcessData;
+pub(crate) use self::process_data::ProcessRoot;
+pub(crate) use self::process_data::ProcessSlot;
+pub(crate) use self::process_data::ProcessTask;
 pub(crate) use self::process_dict::ProcessDict;
 
 pub use self::process_id::ProcessId;

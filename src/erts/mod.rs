@@ -5,7 +5,11 @@ mod process;
 mod runtime;
 mod spawn;
 
+pub(crate) use self::process::ProcessData;
 pub(crate) use self::process::ProcessDict;
+pub(crate) use self::process::ProcessRoot;
+pub(crate) use self::process::ProcessSlot;
+pub(crate) use self::process::ProcessTask;
 
 pub use self::message::Message;
 pub use self::process::AliasRef;

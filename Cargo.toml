@@ -29,3 +29,4 @@ bitflags = { version = "2.10", default-features = false }
 dyn-clone = { version = "1.0", default-features = false }
 hashbrown = { version = "0.16", default-features = false, features = ["default-hasher", "inline-more"] }
 parking_lot = { version = "0.12", default-features = false }
+triomphe = { version = "0.1", default-features = false }
