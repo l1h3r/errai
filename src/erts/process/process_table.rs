@@ -84,6 +84,56 @@ const fn assert_nonzero(value: usize) -> NonZeroUsize {
 }
 
 // -----------------------------------------------------------------------------
+// Index
+// -----------------------------------------------------------------------------
+
+/// A type storing an index known to be valid.
+// #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(transparent)]
+struct Index<'a, T> {
+  value: u64,
+  table: PhantomData<&'a ReadOnly<T>>,
+}
+
+impl<'a, T> Index<'a, T> {
+  #[inline]
+  const fn new(table: &'a ReadOnly<T>, value: u64) -> Self {
+    debug_assert!(value < table.cap.get() as u64);
+    Self { value, table: PhantomData }
+  }
+
+  #[inline]
+  const fn get(self) -> u64 {
+    self.value
+  }
+}
+
+impl<T> Clone for Index<'_, T> {
+  #[inline]
+  fn clone(&self) -> Self {
+    Self {
+      value: self.value,
+      table: PhantomData,
+    }
+  }
+}
+
+impl<T> Copy for Index<'_, T> {}
+
+impl<T> Debug for Index<'_, T> {
+  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+    Debug::fmt(&self.value, f)
+  }
+}
+
+impl<T> PartialEq for Index<'_, T> {
+  #[inline]
+  fn eq(&self, other: &Self) -> bool {
+    self.value.eq(&other.value)
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Permit
 // -----------------------------------------------------------------------------
 
@@ -115,37 +165,62 @@ impl Display for ProcessTableFull {
 impl Error for ProcessTableFull {}
 
 // -----------------------------------------------------------------------------
-// Table Iterator
+// Table Keys Iterator
 // -----------------------------------------------------------------------------
 
-pub struct Iter<'a, T> {
+pub struct Keys<'a, T> {
   table: &'a ProcessTable<T>,
   index: usize,
 }
 
-impl<'a, T> Iter<'a, T> {
+impl<'a, T> Keys<'a, T> {
   #[inline]
   const fn new(table: &'a ProcessTable<T>) -> Self {
     Self { table, index: 0 }
   }
 }
 
-impl<'a, T> Iterator for Iter<'a, T> {
-  type Item = Arc<T>;
+impl<T> Debug for Keys<'_, T> {
+  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+    f.write_str("Keys(..)")
+  }
+}
 
+impl<'a, T> Iterator for Keys<'a, T> {
+  type Item = RawPid;
+
+  #[inline]
   fn next(&mut self) -> Option<Self::Item> {
     loop {
       if self.table.capacity() < self.index {
         return None;
       }
 
-      if let Some(item) = self.table.at(self.index) {
-        self.index += 1;
-        return Some(item);
-      }
+      let index: usize = self.index;
+      let entry: bool = self.table.has(index);
 
       self.index += 1;
+
+      if entry {
+        let pid: RawPid = self
+          .table
+          .readonly
+          .base_index_to_pid(index as u64);
+
+        return Some(pid);
+      }
     }
+  }
+
+  #[inline]
+  fn size_hint(&self) -> (usize, Option<usize>) {
+    let size: usize = self.table.len();
+    (size, Some(size))
+  }
+
+  #[inline]
+  fn count(self) -> usize {
+    self.table.len()
   }
 }
 
@@ -370,7 +445,7 @@ impl<T> ProcessTable<T> {
     let mut uninit: UniqueArc<MaybeUninit<T>> = UniqueArc::new_uninit();
 
     let base_index: u64 = self.acquire_slot(permit);
-    let real_index: u64 = self.readonly.base_index_to_real_index(base_index);
+    let real_index: Index<'_, T> = self.readonly.base_index_to_real_index(base_index);
 
     // Initialize the table entry.
     let data: Arc<T> = {
@@ -386,12 +461,10 @@ impl<T> ProcessTable<T> {
     //
     // This is crucial to prevent an early drop since we're returning the owned
     // `Arc<T>` to the caller.
-    let heap: *mut T = Arc::into_raw(Arc::clone(&data)).cast_mut();
+    let heap: *mut T = Arc::clone(&data).as_ptr().cast_mut();
 
     // Find our slot and store the entry.
-    //
-    // SAFETY: We only yield valid indices from `base_index_to_real_index`.
-    let entry: &AtomicPtr<T> = unsafe { self.readonly.data_unchecked(real_index as usize) };
+    let entry: &AtomicPtr<T> = self.readonly.data(real_index);
 
     entry.store(heap, Ordering::Relaxed);
 
@@ -406,10 +479,8 @@ impl<T> ProcessTable<T> {
   /// behavior is memory-safe and not considered `unsafe`, though it may be
   /// surprising to some users.
   pub fn remove(&self, pid: RawPid) -> Option<Arc<T>> {
-    let index: u64 = self.readonly.pid_to_real_index(pid);
-
-    // SAFETY: We only yield valid indices from `pid_to_real_index`.
-    let entry: &AtomicPtr<T> = unsafe { self.readonly.data_unchecked(index as usize) };
+    let index: Index<'_, T> = self.readonly.pid_to_real_index(pid);
+    let entry: &AtomicPtr<T> = self.readonly.data(index);
 
     // Remove the current entry from the table, we'll dealloc at the end.
     let heap: *mut T = entry.swap(ptr::null_mut(), Ordering::Relaxed);
@@ -432,17 +503,38 @@ impl<T> ProcessTable<T> {
 
     let _ignore: u32 = self.volatile.decr_len_release();
 
-    // SAFETY: The pointer was produced by `Arc::into_raw` in `Self::insert` and
+    // SAFETY: The pointer was produced by `Arc::as_ptr` in `Self::insert` and
     //         we immediately return the owned value to prevent any additional
     //         (mis)uses of the pointer.
+    //
+    // TODO: Unsure if truely sound to use `Arc::from_raw` here...
     Some(unsafe { Arc::from_raw(heap) })
   }
 
-  pub fn at(&self, index: usize) -> Option<Arc<T>> {
-    let real: u64 = self.readonly.base_index_to_real_index(index as u64);
-    let item: &AtomicPtr<T> = self.readonly.data(real as usize)?;
-    let heap: *mut T = item.load(Ordering::Relaxed);
+  pub fn has(&self, index: usize) -> bool {
+    if self.capacity() < index {
+      return false;
+    }
 
+    let index: Index<'_, T> = self.readonly.base_index_to_real_index(index as u64);
+    let entry: &AtomicPtr<T> = self.readonly.data(index);
+
+    let heap: *mut T = entry.load(Ordering::Acquire);
+
+    !heap.is_null()
+  }
+
+  pub fn at(&self, index: usize) -> Option<Arc<T>> {
+    if self.capacity() < index {
+      return None;
+    }
+
+    let index: Index<'_, T> = self.readonly.base_index_to_real_index(index as u64);
+    let entry: &AtomicPtr<T> = self.readonly.data(index);
+
+    let heap: *mut T = entry.load(Ordering::Acquire);
+
+    // No item the the given index.
     if heap.is_null() {
       return None;
     }
@@ -455,8 +547,8 @@ impl<T> ProcessTable<T> {
   }
 
   #[inline]
-  pub fn iter(&self) -> Iter<'_, T> {
-    Iter::new(self)
+  pub fn keys(&self) -> Keys<'_, T> {
+    Keys::new(self)
   }
 
   // ---------------------------------------------------------------------------
@@ -528,12 +620,10 @@ impl<T> ProcessTable<T> {
   fn acquire_slot(&self, _permit: Permit<'_, T>) -> u64 {
     'acquire: loop {
       let base_index: u64 = self.volatile.incr_aid_acquire();
-      let real_index: u64 = self.readonly.base_index_to_real_index(base_index);
+      let real_index: Index<'_, T> = self.readonly.base_index_to_real_index(base_index);
 
       // Find our slot and store the reservation marker.
-      //
-      // SAFETY: We only yield valid indices from `base_index_to_real_index`.
-      let atomic: &AtomicU64 = unsafe { self.readonly.slot_unchecked(real_index as usize) };
+      let atomic: &AtomicU64 = self.readonly.slot(real_index);
       let result: u64 = atomic.swap(RESERVED, Ordering::Relaxed);
 
       // This slot was already reserved, try again.
@@ -550,12 +640,10 @@ impl<T> ProcessTable<T> {
     'release: loop {
       // Increment the slot counter and convert to an index in the slot table.
       let base_index: u64 = self.volatile.incr_fid_release();
-      let real_index: u64 = self.readonly.base_index_to_real_index(base_index);
+      let real_index: Index<'_, T> = self.readonly.base_index_to_real_index(base_index);
 
       // Find our slot and store the updated value.
-      //
-      // SAFETY: We only yield valid indices from `base_index_to_real_index`.
-      let atomic: &AtomicU64 = unsafe { self.readonly.slot_unchecked(real_index as usize) };
+      let atomic: &AtomicU64 = self.readonly.slot(real_index);
 
       let result: Result<u64, u64> =
         atomic.compare_exchange(RESERVED, update, Ordering::Release, Ordering::Relaxed);
@@ -573,15 +661,21 @@ impl<T> ProcessTable<T> {
 
   #[inline]
   fn alloc_data_array(layout: Layout, count: NonZeroUsize) -> NonNull<AtomicPtr<T>> {
-    // SAFETY: `alloc()` is safe to call here as the layout was validated in
-    //         `Self::with_capacity`. We also initialize the array immediately
-    //         afterwards, ensuring we only return valid data.
+    assert!(layout.size() > 0, "layout size must be non-zero");
+
+    // SAFETY: We just ensured that `layout` has a non-zero size.
     let ptr: NonNull<AtomicPtr<T>> = unsafe { Self::alloc(layout) };
 
     // Initialize all data atomics with a NULL ptr.
     for offset in 0..count.get() {
       // SAFETY: `add` is safe as we are iterating over the allocated memory,
       //         and `write` is safe as we are initializing with a valid value.
+
+
+      // SAFETY: The iteration guarantees we are in the bounds of the allocation,
+      //         therefore we satisfy all requirements of `add`. The final
+      //         destination pointer is valid for writes as we've satisfied all
+      //         requirements at earlier stages.
       unsafe {
         ptr.add(offset).write(AtomicPtr::new(ptr::null_mut()));
       }
@@ -592,9 +686,9 @@ impl<T> ProcessTable<T> {
 
   #[inline]
   fn alloc_slot_array(layout: Layout, blocks: NonZeroUsize) -> NonNull<AtomicU64> {
-    // SAFETY: `alloc()` is safe to call here as the layout was validated in
-    //         `Self::with_capacity`. We also initialize the array immediately
-    //         afterwards, ensuring we only return valid data.
+    assert!(layout.size() > 0, "layout size must be non-zero");
+
+    // SAFETY: We just ensured that `layout` has a non-zero size.
     let ptr: NonNull<AtomicU64> = unsafe { Self::alloc(layout) };
 
     let mut offset: usize = 0;
@@ -608,8 +702,12 @@ impl<T> ProcessTable<T> {
           .try_into()
           .expect("valid default slot value");
 
-        // SAFETY: `add` is safe as we are within the bounds of the allocation,
-        //         and `write` is safe as we are initializing with a valid value.
+        // SAFETY: The table array is arranged as cache line-sized blocks of
+        //         slots; the forumla to determine this here is `blocks * SLOT_COUNT`.
+        //         Since we are guaranteed to stay in the bounds of the
+        //         allocation, we satisfy all requirements of `add`. The final
+        //         destination pointer is valid for writes as we've satisfied
+        //         all requirements at earlier stages.
         unsafe {
           ptr.add(offset).write(AtomicU64::new(value));
         }
@@ -621,34 +719,36 @@ impl<T> ProcessTable<T> {
     ptr
   }
 
-  /// Deallocate the data array specified by `ptr`.
+  /// Deallocate the data array at the given `ptr` with the given `layout`.
   ///
   /// # Safety
   ///
-  /// `ptr` must have been previously allocated using `alloc()`,
-  /// which ensures all invavriants are upheld.
+  /// See [`Self::dealloc`] for invariants to uphold.
   #[inline]
   unsafe fn dealloc_data_array(layout: Layout, ptr: NonNull<AtomicPtr<T>>) {
     // SAFETY: This is guaranteed to be safe by the caller.
     unsafe { Self::dealloc(layout, ptr) }
   }
 
-  /// Deallocate the slot array specified by `ptr`.
+  /// Deallocate the slot array at the given `ptr` with the given `layout`.
   ///
   /// # Safety
   ///
-  /// `ptr` must have been previously allocated using `alloc()`,
-  /// which ensures all invavriants are upheld.
+  /// See [`Self::dealloc`] for invariants to uphold.
   #[inline]
   unsafe fn dealloc_slot_array(layout: Layout, ptr: NonNull<AtomicU64>) {
     // SAFETY: This is guaranteed to be safe by the caller.
     unsafe { Self::dealloc(layout, ptr) }
   }
 
+  /// Allocates memory as described by the given `layout`.
+  ///
+  /// # Safety
+  ///
+  /// `layout` must have a non-zero size.
   #[inline]
   unsafe fn alloc<A>(layout: Layout) -> NonNull<A> {
-    // SAFETY: The layout was validated in `Self::with_capacity` to be non-zero
-    //         and properly aligned.
+    // SAFETY: This is guaranteed to be safe by the caller.
     let Some(ptr) = NonNull::new(unsafe { alloc(layout) }) else {
       handle_alloc_error(layout);
     };
@@ -656,10 +756,18 @@ impl<T> ProcessTable<T> {
     ptr.cast()
   }
 
+  /// Deallocates the block of memory at the given `ptr` with the given `layout`.
+  ///
+  /// # Safety
+  ///
+  /// The caller must ensure:
+  ///
+  /// - `ptr` is a block of memory currently allocated via [`Self::alloc`] and,
+  ///
+  /// - `layout` is the same layout that was used to allocate that block of memory.
   #[inline]
   unsafe fn dealloc<A>(layout: Layout, ptr: NonNull<A>) {
-    // SAFETY: The pointer is valid, as it's returned by the allocator. We are
-    //         deallocating it using the correct layout for the memory.
+    // SAFETY: This is guaranteed to be safe by the caller.
     unsafe { dealloc(ptr.cast().as_ptr(), layout) }
   }
 }
@@ -670,8 +778,9 @@ impl<T> Drop for ProcessTable<T> {
     let layout: Layout = Layout::from_size_align(memory, CACHE_LINE).expect("valid layout");
 
     // SAFETY: The `ptr_data` and `ptr_slot` pointers are guaranteed to be valid,
-    //         as they are allocated using internal methods The `dealloc_*`
-    //         methods are safe since we are passing the correct pointers.
+    //         as they are both allocated using the internal `alloc` function.
+    //         The `dealloc_*` functions are therefore safe as we use the
+    //         same computed layout as `alloc` to deallocate.
     unsafe {
       Self::dealloc_data_array(layout, self.readonly.ptr_data);
       Self::dealloc_slot_array(layout, self.readonly.ptr_slot);
@@ -764,34 +873,27 @@ struct ReadOnly<T> {
 }
 
 impl<T> ReadOnly<T> {
-  /// Returns a reference to the data entry at `index`, or `None` if out of bounds.
+  /// Returns a reference to the data entry at `index`.
   #[inline]
-  fn data(&self, index: usize) -> Option<&AtomicPtr<T>> {
-    if index < self.cap.get() {
-      // SAFETY: `index` was just checked to be in bounds.
-      Some(unsafe { self.data_unchecked(index) })
-    } else {
-      None
-    }
+  const fn data(&self, index: Index<'_, T>) -> &AtomicPtr<T> {
+    // SAFETY: The `Index` type is known to be in bounds.
+    unsafe { self.data_unchecked(index.get() as usize) }
   }
 
-  /// Returns a reference to the slot entry at `index`, or `None` if out of bounds.
+  /// Returns a reference to the slot entry at `index`.
   #[inline]
-  fn slot(&self, index: usize) -> Option<&AtomicU64> {
-    if index < self.cap.get() {
-      // SAFETY: `index` was just checked to be in bounds.
-      Some(unsafe { self.slot_unchecked(index) })
-    } else {
-      None
-    }
+  const fn slot(&self, index: Index<'_, T>) -> &AtomicU64 {
+    // SAFETY: The `Index` type is known to be in bounds.
+    unsafe { self.slot_unchecked(index.get() as usize) }
   }
 
   /// Returns a reference to the data entry at `index`, without doing safety checks.
   ///
   /// # Safety
   ///
-  ///   - The `index` must be *less* than the value of [`cap`][Self::cap].
-  ///   - The pointer must be [convertible to a reference].
+  /// - `index` must be *less* than the value of [`cap`][Self::cap] and,
+  ///
+  /// - the entry pointer must be [convertible to a reference].
   ///
   /// [convertible to a reference]: std::ptr#pointer-to-reference-conversion
   #[inline]
@@ -809,8 +911,9 @@ impl<T> ReadOnly<T> {
   ///
   /// # Safety
   ///
-  ///   - The `index` must be *less* than the value of [`cap`][Self::cap].
-  ///   - The pointer must be [convertible to a reference].
+  /// - `index` must be *less* than the value of [`cap`][Self::cap] and,
+  ///
+  /// - the entry pointer must be [convertible to a reference].
   ///
   /// [convertible to a reference]: std::ptr#pointer-to-reference-conversion
   #[inline]
@@ -847,23 +950,22 @@ impl<T> ReadOnly<T> {
   }
 
   #[inline]
-  const fn pid_data_to_real_index(&self, input: u64) -> u64 {
-    input & self.id_mask_entry as u64
+  const fn pid_data_to_real_index(&self, input: u64) -> Index<'_, T> {
+    Index::new(self, input & self.id_mask_entry as u64)
   }
 
   #[inline]
-  const fn base_index_to_real_index(&self, input: u64) -> u64 {
+  const fn base_index_to_real_index(&self, input: u64) -> Index<'_, T> {
     let mut value: u64 = 0;
     value += (input & self.id_mask_block as u64) << self.id_shift_block;
     value += (input >> self.id_shift_index) & self.id_mask_index as u64;
-    debug_assert!(value < self.cap.get() as u64);
-    value
+    Index::new(self, value)
   }
 
   #[inline]
   const fn base_index_to_pid_data(&self, input: u64) -> u64 {
     let value: u64 = input & !(self.id_mask_entry as u64);
-    let value: u64 = value | self.base_index_to_real_index(input);
+    let value: u64 = value | self.base_index_to_real_index(input).get();
     debug_assert!(self.pid_data_to_base_index(value) == input);
     value
   }
@@ -877,9 +979,9 @@ impl<T> ReadOnly<T> {
   }
 
   #[inline]
-  const fn pid_to_real_index(&self, input: RawPid) -> u64 {
+  const fn pid_to_real_index(&self, input: RawPid) -> Index<'_, T> {
     let value: u64 = input.into_bits() >> RawPid::TAG_BITS;
-    let value: u64 = self.pid_data_to_real_index(value);
+    let value: Index<'_, T> = self.pid_data_to_real_index(value);
     value
   }
 
@@ -931,7 +1033,7 @@ mod tests {
     let table: Table = Table::with_capacity(1 << 5);
 
     for index in 0..table.capacity() * 3 {
-      let real: u64 = table.readonly.base_index_to_real_index(index as u64);
+      let real: Index<'_, u8> = table.readonly.base_index_to_real_index(index as u64);
       let data: u64 = table.readonly.base_index_to_pid_data(index as u64);
       let rpid: RawPid = table.readonly.base_index_to_pid(index as u64);
 
