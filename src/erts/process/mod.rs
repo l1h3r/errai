@@ -15,8 +15,11 @@ use crate::lang::Term;
 
 pub(crate) type ProcessTask = ();
 
+mod process_dict;
 mod process_id;
 mod process_info;
+
+pub(crate) use self::process_dict::ProcessDict;
 
 pub use self::process_id::ProcessId;
 pub use self::process_info::ProcessInfo;

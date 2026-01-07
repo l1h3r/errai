@@ -5,6 +5,8 @@ mod process;
 mod runtime;
 mod spawn;
 
+pub(crate) use self::process::ProcessDict;
+
 pub use self::message::Message;
 pub use self::process::AliasRef;
 pub use self::process::MonitorRef;
