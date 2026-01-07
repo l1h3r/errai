@@ -17,12 +17,15 @@ mod process_data;
 mod process_dict;
 mod process_id;
 mod process_info;
+mod process_table;
 
 pub(crate) use self::process_data::ProcessData;
 pub(crate) use self::process_data::ProcessRoot;
 pub(crate) use self::process_data::ProcessSlot;
 pub(crate) use self::process_data::ProcessTask;
 pub(crate) use self::process_dict::ProcessDict;
+pub(crate) use self::process_table::ProcessTable;
+pub(crate) use self::process_table::ProcessTableFull;
 
 pub use self::process_id::ProcessId;
 pub use self::process_info::ProcessInfo;

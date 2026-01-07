@@ -3,6 +3,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
+use crate::bifs::translate_pid;
+
 /// The raw bits of a process identifier.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -11,6 +13,27 @@ pub struct RawPid {
 }
 
 impl RawPid {
+  pub(crate) const TAG_DATA: u64 = (0x0 << Self::TAG_BITS) | 0x3;
+  pub(crate) const TAG_MASK: u64 = 0xF;
+
+  pub(crate) const TAG_BITS: u32 = 4;
+  pub(crate) const PID_BITS: u32 = u32::BITS - Self::TAG_BITS;
+
+  pub(crate) const NUMBER_BITS: u32 = 28;
+  pub(crate) const SERIAL_BITS: u32 = Self::PID_BITS - Self::NUMBER_BITS;
+
+  /// Creates a new `RawPid` from the given `bits`.
+  #[inline]
+  pub(crate) const fn from_bits(bits: u64) -> Self {
+    Self { bits }
+  }
+
+  /// Converts `self` into raw bits.
+  #[inline]
+  pub(crate) const fn into_bits(self) -> u64 {
+    self.bits
+  }
+
   /// Returns the PID number value.
   #[inline]
   pub const fn number(self) -> u32 {
@@ -32,6 +55,15 @@ impl Debug for RawPid {
 
 impl Display for RawPid {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-    write!(f, "#PID<0.{}.{}>", self.number(), self.serial())
+    // For internal PIDs, we use `0` as the channel number.
+    // For external PIDs (formatted elsewhere), we use the node name index.
+    //
+    // Note: We need access to the readonly data of the process table to
+    //       understand the bit transformations required to format the PID.
+    if let Some((number, serial)) = translate_pid(*self) {
+      write!(f, "#PID<0.{}.{}>", number, serial)
+    } else {
+      write!(f, "#PID<0.x.x>")
+    }
   }
 }
