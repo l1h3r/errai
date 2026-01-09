@@ -1,3 +1,4 @@
+// OTP COMMIT: 11c6025cba47e24950cd4b4fc9f7e9e522388542
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
 use parking_lot::RwLock;
@@ -53,10 +54,19 @@ pub(crate) fn translate_pid(pid: RawPid) -> Option<(u32, u32)> {
   }
 }
 
+pub(crate) fn process_delete(pid: InternalPid) -> Option<Arc<ProcessSlot>> {
+  REGISTERED_PROCS.remove(pid.bits())
+}
+
 // -----------------------------------------------------------------------------
 // General
+//
+// BEAM Builtin:
+//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c
+//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_bif_info.c
 // -----------------------------------------------------------------------------
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L4078
 pub(crate) fn process_list() -> Vec<InternalPid> {
   let capacity: usize = REGISTERED_PROCS.len();
   let mut data: Vec<InternalPid> = Vec::with_capacity(capacity);
@@ -68,6 +78,7 @@ pub(crate) fn process_list() -> Vec<InternalPid> {
   data
 }
 
+// BEAM Builtin: N/A
 pub(crate) fn process_get_flags(process: &ProcessTask) -> ProcessFlags {
   let guard: RwLockReadGuard<'_, ProcessData> = process.data.read();
   let value: ProcessFlags = guard.pflags;
@@ -77,14 +88,17 @@ pub(crate) fn process_get_flags(process: &ProcessTask) -> ProcessFlags {
   value
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2013
 pub(crate) fn process_set_flags(process: &ProcessTask, flags: ProcessFlags) {
   process.data.write().pflags = flags;
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2013
 pub(crate) fn process_set_flag(process: &ProcessTask, flag: ProcessFlags, value: bool) {
   process.data.write().pflags.set(flag, value);
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_bif_info.c#L1558
 pub(crate) fn process_info(process: &ProcessTask, pid: InternalPid) -> Option<ProcessInfo> {
   // ---------------------------------------------------------------------------
   // 1. Find Process
@@ -138,8 +152,13 @@ pub(crate) fn process_info(process: &ProcessTask, pid: InternalPid) -> Option<Pr
 
 // -----------------------------------------------------------------------------
 // Local Name Registration
+//
+// BEAM Builtin:
+//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/register.h
+//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/register.c
 // -----------------------------------------------------------------------------
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2295
 pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: Atom) {
   // ---------------------------------------------------------------------------
   // 1. Validate
@@ -206,6 +225,7 @@ pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: At
   drop(name_guard);
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2309
 pub(crate) fn process_unregister(process: &ProcessTask, name: Atom) {
   // ---------------------------------------------------------------------------
   // 1. Lock Name Registry
@@ -261,6 +281,7 @@ pub(crate) fn process_unregister(process: &ProcessTask, name: Atom) {
   drop(name_guard);
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2327
 pub(crate) fn process_whereis(name: Atom) -> Option<InternalPid> {
   let guard: RwLockReadGuard<'_, HashMap<Atom, InternalPid>> = REGISTERED_NAMES.read();
   let value: Option<InternalPid> = guard.get(&name).copied();
@@ -270,6 +291,7 @@ pub(crate) fn process_whereis(name: Atom) -> Option<InternalPid> {
   value
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/register.c#L576
 pub(crate) fn process_registered() -> Vec<Atom> {
   let guard: RwLockReadGuard<'_, HashMap<Atom, InternalPid>> = REGISTERED_NAMES.read();
   let value: Vec<Atom> = Vec::from_iter(guard.keys().copied());
@@ -281,32 +303,43 @@ pub(crate) fn process_registered() -> Vec<Atom> {
 
 // -----------------------------------------------------------------------------
 // Process Dictionary
+//
+// BEAM Builtin:
+//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.h
+//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c
 // -----------------------------------------------------------------------------
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L353
 pub(crate) fn process_dict_put(process: &ProcessTask, key: Atom, value: Term) -> Option<Term> {
   process.dict.insert(key, value)
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L324
 pub(crate) fn process_dict_get(process: &ProcessTask, key: Atom) -> Option<Term> {
   process.dict.get(&key)
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L373
 pub(crate) fn process_dict_delete(process: &ProcessTask, key: Atom) -> Option<Term> {
   process.dict.remove(&key)
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L363
 pub(crate) fn process_dict_clear(process: &ProcessTask) -> Vec<(Atom, Term)> {
   process.dict.clear()
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L315
 pub(crate) fn process_dict_pairs(process: &ProcessTask) -> Vec<(Atom, Term)> {
   process.dict.pairs()
 }
 
+// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L333
 pub(crate) fn process_dict_keys(process: &ProcessTask) -> Vec<Atom> {
   process.dict.keys()
 }
 
+// BEAM Builtin: N/A
 pub(crate) fn process_dict_values(process: &ProcessTask) -> Vec<Term> {
   process.dict.values()
 }

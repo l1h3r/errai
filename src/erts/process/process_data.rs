@@ -3,6 +3,7 @@ use std::ops::Deref;
 use tokio::task::JoinHandle;
 use triomphe::Arc;
 
+use crate::bifs;
 use crate::erts::ProcessDict;
 use crate::erts::ProcessFlags;
 use crate::lang::Atom;
@@ -59,6 +60,14 @@ pub(crate) struct ProcessSlot {
 #[repr(C)]
 pub(crate) struct ProcessTask {
   pub(crate) slot: Arc<ProcessSlot>,
+}
+
+impl Drop for ProcessTask {
+  fn drop(&mut self) {
+    if bifs::process_delete(self.slot.root.id).is_none() {
+      eprintln!("[errai]: Dangling Process ({})", self.slot.root.id);
+    }
+  }
 }
 
 impl Deref for ProcessTask {

@@ -1,6 +1,8 @@
 use bitflags::bitflags;
 use std::time::Duration;
+use tokio::time;
 
+use crate::bifs;
 use crate::erts::Message;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
@@ -78,7 +80,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#self/0>
   pub fn this() -> InternalPid {
-    todo!("this/0")
+    CONTEXT.with(|this| this.slot.root.id)
   }
 
   /// Returns a list of process identifiers corresponding to all the
@@ -90,14 +92,14 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#processes/0>
   pub fn list() -> Vec<InternalPid> {
-    todo!("list/0")
+    bifs::process_list()
   }
 
   /// Sleeps the current process for the given `timeout`.
   ///
   /// REF: **N/A**
   pub async fn sleep(timeout: Duration) {
-    todo!("sleep/1")
+    time::sleep(timeout).await
   }
 
   /// Sends an exit signal with the given `reason` to `pid`.
@@ -117,21 +119,21 @@ impl Process {
   ///
   /// REF: **N/A**
   pub fn get_flags() -> ProcessFlags {
-    todo!("get_flags/0")
+    CONTEXT.with(|this| bifs::process_get_flags(this))
   }
 
   /// Sets the process flags of the calling process.
   ///
   /// REF: **N/A**
   pub fn set_flags(flags: ProcessFlags) {
-    todo!("set_flags/1")
+    CONTEXT.with(|this| bifs::process_set_flags(this, flags))
   }
 
   /// Sets the process flag indicated to the specified value.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_flag/2>
   pub fn set_flag(flag: ProcessFlags, value: bool) {
-    todo!("set_flag/2")
+    CONTEXT.with(|this| bifs::process_set_flag(this, flag, value))
   }
 
   /// Returns information about the process identified by `pid`.
@@ -140,7 +142,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_info/1>
   pub fn info(pid: InternalPid) -> Option<ProcessInfo> {
-    todo!("info/1")
+    CONTEXT.with(|this| bifs::process_info(this, pid))
   }
 
   // ---------------------------------------------------------------------------
@@ -262,7 +264,7 @@ impl Process {
   /// Once the monitored process dies, a message is delivered to the monitoring
   /// process in the shape of:
   ///
-  /// ```
+  /// ```text
   /// {:DOWN, ref, :process, object, reason}
   /// ```
   ///
@@ -364,7 +366,7 @@ impl Process {
   /// - The PID is currently registered under a different name
   /// - The name is already registered to another PID
   pub fn register(pid: InternalPid, name: impl Into<Atom>) {
-    todo!("register/2")
+    CONTEXT.with(|this| bifs::process_register(this, pid, name.into()))
   }
 
   /// Removes the registered `name`, associated with a PID.
@@ -375,21 +377,21 @@ impl Process {
   ///
   /// Raises [`ArgumentError`] if the name is not registered to any PID.
   pub fn unregister(name: impl Into<Atom>) {
-    todo!("unregister/1")
+    CONTEXT.with(|this| bifs::process_unregister(this, name.into()))
   }
 
   /// Returns the PID under `name`, or `None` if the name is not registered.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#whereis/1>
   pub fn whereis(name: impl Into<Atom>) -> Option<InternalPid> {
-    todo!("whereis/1")
+    bifs::process_whereis(name.into())
   }
 
   /// Returns a list of names which have been registered using [`Process::register`].
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#registered/0>
   pub fn registered() -> Vec<Atom> {
-    todo!("registered/0")
+    bifs::process_registered()
   }
 
   // ---------------------------------------------------------------------------
@@ -403,7 +405,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#put/2>
   pub fn put(key: impl Into<Atom>, value: impl Into<Term>) -> Option<Term> {
-    todo!("put/2")
+    CONTEXT.with(|this| bifs::process_dict_put(this, key.into(), value.into()))
   }
 
   /// Returns the value for the given `key` in the process dictionary,
@@ -411,7 +413,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get/1>
   pub fn get(key: impl Into<Atom>) -> Option<Term> {
-    todo!("get/1")
+    CONTEXT.with(|this| bifs::process_dict_get(this, key.into()))
   }
 
   /// Deletes the given `key` from the process dictionary.
@@ -421,34 +423,34 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#erase/1>
   pub fn delete(key: impl Into<Atom>) -> Option<Term> {
-    todo!("delete/1")
+    CONTEXT.with(|this| bifs::process_dict_delete(this, key.into()))
   }
 
   /// Clears the prcoess dictionary and returns the previous key-value pairs.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#erase/0>
   pub fn clear() -> Vec<(Atom, Term)> {
-    todo!("clear/0")
+    CONTEXT.with(|this| bifs::process_dict_clear(this))
   }
 
   /// Returns a list of all key-value pairs in the process dictionary.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get/0>
   pub fn pairs() -> Vec<(Atom, Term)> {
-    todo!("pairs/0")
+    CONTEXT.with(|this| bifs::process_dict_pairs(this))
   }
 
   /// Returns a list of all keys in the process dictionary.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get_keys/0>
   pub fn keys() -> Vec<Atom> {
-    todo!("keys/0")
+    CONTEXT.with(|this| bifs::process_dict_keys(this))
   }
 
   /// Returns a list of all values in the process dictionary.
   ///
   /// REF: **N/A**
   pub fn values() -> Vec<Term> {
-    todo!("values/0")
+    CONTEXT.with(|this| bifs::process_dict_values(this))
   }
 }

@@ -179,9 +179,17 @@ impl<'a, T> Iterator for Keys<'a, T> {
 ///
 /// Example table with 4 blocks and 4 slots per block:
 ///
-/// ┌──────────┐ ┌──────────┐ ┌───────────┐ ┌───────────┐
-/// │ 0 4 8 12 │ │ 1 5 9 13 │ │ 2 6 10 14 │ │ 3 7 11 15 │
-/// └──────────┘ └──────────┘ └───────────┘ └───────────┘
+/// ```text
+/// ┌───────────┐
+/// │ 0 4  8 12 │ Cache Line
+/// ├───────────┤
+/// │ 1 5  9 13 │ Cache Line
+/// ├───────────┤
+/// │ 2 6 10 14 │ Cache Line
+/// ├───────────┤
+/// │ 3 7 11 15 │ Cache Line
+/// └───────────┘
+/// ```
 ///
 /// - Boxes represent blocks, and numbers represent logical slot indices.
 /// - Sequentially inserted entries fill slots across blocks, wrapping around when full.
