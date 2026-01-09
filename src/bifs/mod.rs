@@ -7,6 +7,8 @@ use std::sync::LazyLock;
 use triomphe::Arc;
 
 use crate::erts::ProcessData;
+use crate::erts::ProcessFlags;
+use crate::erts::ProcessInfo;
 use crate::erts::ProcessSlot;
 use crate::erts::ProcessTable;
 use crate::erts::ProcessTask;
@@ -49,6 +51,89 @@ pub(crate) fn translate_pid(pid: RawPid) -> Option<(u32, u32)> {
   } else {
     None
   }
+}
+
+// -----------------------------------------------------------------------------
+// General
+// -----------------------------------------------------------------------------
+
+pub(crate) fn process_list() -> Vec<InternalPid> {
+  let capacity: usize = REGISTERED_PROCS.len();
+  let mut data: Vec<InternalPid> = Vec::with_capacity(capacity);
+
+  for pid in REGISTERED_PROCS.keys() {
+    data.push(InternalPid::new(pid));
+  }
+
+  data
+}
+
+pub(crate) fn process_get_flags(process: &ProcessTask) -> ProcessFlags {
+  let guard: RwLockReadGuard<'_, ProcessData> = process.data.read();
+  let value: ProcessFlags = guard.pflags;
+
+  drop(guard);
+
+  value
+}
+
+pub(crate) fn process_set_flags(process: &ProcessTask, flags: ProcessFlags) {
+  process.data.write().pflags = flags;
+}
+
+pub(crate) fn process_set_flag(process: &ProcessTask, flag: ProcessFlags, value: bool) {
+  process.data.write().pflags.set(flag, value);
+}
+
+pub(crate) fn process_info(process: &ProcessTask, pid: InternalPid) -> Option<ProcessInfo> {
+  // ---------------------------------------------------------------------------
+  // 1. Find Process
+  // ---------------------------------------------------------------------------
+
+  let hold: Arc<ProcessSlot>;
+  let this: &ProcessSlot;
+
+  if process.root.id == pid {
+    this = process;
+  } else {
+    let Some(context) = REGISTERED_PROCS.get(pid.bits()) else {
+      return None;
+    };
+
+    hold = context;
+    this = &hold;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2. Lock Process
+  // ---------------------------------------------------------------------------
+
+  let guard: RwLockReadGuard<'_, ProcessData> = this.data.read();
+
+  // ---------------------------------------------------------------------------
+  // 3. Gather Process Info
+  // ---------------------------------------------------------------------------
+
+  let info: ProcessInfo = ProcessInfo {
+    async_dist: guard.pflags.contains(ProcessFlags::ASYNC_DIST),
+    dictionary: HashMap::from_iter(this.dict.pairs()),
+    pid_group_leader: guard.group_leader,
+    pid_spawn_parent: guard.spawn_parent,
+    registered_name: guard.name,
+    trap_exit: guard.pflags.contains(ProcessFlags::TRAP_EXIT),
+  };
+
+  // ---------------------------------------------------------------------------
+  // 4. Unlock Process
+  // ---------------------------------------------------------------------------
+
+  drop(guard);
+
+  // ---------------------------------------------------------------------------
+  // 5. Return
+  // ---------------------------------------------------------------------------
+
+  Some(info)
 }
 
 // -----------------------------------------------------------------------------
