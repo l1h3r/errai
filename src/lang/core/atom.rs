@@ -11,6 +11,9 @@ pub struct Atom {
 }
 
 impl Atom {
+  /// The atom `undefined`.
+  pub const UNDEFINED: Self = Self::new("undefined");
+
   /// Creates a new `Atom`.
   #[inline]
   pub const fn new(data: &'static str) -> Self {
