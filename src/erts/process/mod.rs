@@ -24,11 +24,11 @@ pub(crate) use self::process_data::ProcessRoot;
 pub(crate) use self::process_data::ProcessSlot;
 pub(crate) use self::process_data::ProcessTask;
 pub(crate) use self::process_dict::ProcessDict;
-pub(crate) use self::process_table::ProcessTable;
-pub(crate) use self::process_table::ProcessTableFull;
 
 pub use self::process_id::ProcessId;
 pub use self::process_info::ProcessInfo;
+pub use self::process_table::ProcessTable;
+pub use self::process_table::ProcessTableFull;
 
 // -----------------------------------------------------------------------------
 // @alias - References

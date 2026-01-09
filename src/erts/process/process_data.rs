@@ -43,7 +43,8 @@ pub(crate) struct ProcessData {
 // -----------------------------------------------------------------------------
 
 #[derive(Debug)]
-#[repr(C)]
+#[cfg_attr(target_pointer_width = "32", repr(C, align(4)))]
+#[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]
 pub(crate) struct ProcessSlot {
   pub(crate) root: ProcessRoot,
   pub(crate) data: RwLock<ProcessData>,
