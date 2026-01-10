@@ -4,15 +4,26 @@ use hashbrown::hash_map::Entry;
 use parking_lot::RwLock;
 use parking_lot::RwLockReadGuard;
 use parking_lot::RwLockWriteGuard;
+use std::mem::MaybeUninit;
+use std::panic::AssertUnwindSafe;
 use std::sync::LazyLock;
+use tokio::task;
+use tokio::task::futures::TaskLocalFuture;
 use triomphe::Arc;
 
+use crate::core::CatchUnwind;
+use crate::core::raise;
+use crate::erts::Process;
 use crate::erts::ProcessData;
+use crate::erts::ProcessDict;
 use crate::erts::ProcessFlags;
 use crate::erts::ProcessInfo;
+use crate::erts::ProcessRoot;
 use crate::erts::ProcessSlot;
 use crate::erts::ProcessTable;
 use crate::erts::ProcessTask;
+use crate::erts::SpawnConfig;
+use crate::erts::SpawnHandle;
 use crate::lang::Atom;
 use crate::lang::InternalPid;
 use crate::lang::RawPid;
@@ -31,16 +42,6 @@ static REGISTERED_PROCS: LazyLock<ProcessTable<ProcessSlot>> =
 // A table mapping registered names to internal process identifiers.
 static REGISTERED_NAMES: LazyLock<RwLock<HashMap<Atom, InternalPid>>> =
   LazyLock::new(|| RwLock::new(HashMap::with_capacity(CAP_REGISTERED_NAMES)));
-
-// -----------------------------------------------------------------------------
-// Error Utilities
-// -----------------------------------------------------------------------------
-
-macro_rules! raise {
-  ($error:ident, $type:literal, $data:literal) => {
-    ::std::panic!("{}", $crate::core::$error::new($type, $data));
-  };
-}
 
 // -----------------------------------------------------------------------------
 // Common Utilities
@@ -151,6 +152,125 @@ pub(crate) fn process_info(process: &ProcessTask, pid: InternalPid) -> Option<Pr
 }
 
 // -----------------------------------------------------------------------------
+// Spawning & Messaging
+// -----------------------------------------------------------------------------
+
+pub(crate) fn process_spawn<F>(
+  process: &ProcessTask,
+  options: SpawnConfig,
+  future: F,
+) -> SpawnHandle
+where
+  F: Future<Output = ()> + Send + 'static,
+{
+  process_spawn_internal(Some(process), options, future)
+}
+
+pub(crate) fn process_spawn_root<F>(future: F) -> InternalPid
+where
+  F: Future<Output = ()> + Send + 'static,
+{
+  match process_spawn_internal(None, SpawnConfig::new(), future) {
+    SpawnHandle::Process(process) => process,
+    SpawnHandle::Monitor(_, _) => unreachable!(),
+  }
+}
+
+fn process_spawn_internal<F>(
+  process: Option<&ProcessTask>,
+  options: SpawnConfig,
+  future: F,
+) -> SpawnHandle
+where
+  F: Future<Output = ()> + Send + 'static,
+{
+  // ---------------------------------------------------------------------------
+  // 1. Setup Context
+  // ---------------------------------------------------------------------------
+
+  // Insert a dummy PID for now, the real PID will be given if the insert succeeds.
+  let mut target_pid: InternalPid = InternalPid::new(RawPid::from_bits(0));
+  let mut leader_pid: InternalPid = target_pid;
+  let parent_pid: Option<InternalPid> = process.map(|process| process.root.id);
+
+  // Initialize default flags from user-provided options.
+  let flags: ProcessFlags = {
+    let mut flags: ProcessFlags = ProcessFlags::empty();
+    flags.set(ProcessFlags::TRAP_EXIT, options.trap_exit);
+    flags.set(ProcessFlags::ASYNC_DIST, options.async_dist);
+    flags
+  };
+
+  // ---------------------------------------------------------------------------
+  // 2. Create Process State
+  // ---------------------------------------------------------------------------
+
+  let initialize = |uninit: &mut MaybeUninit<ProcessSlot>, pid: RawPid| {
+    target_pid = InternalPid::new(pid);
+    leader_pid = parent_pid.unwrap_or(target_pid);
+
+    let slot: *mut ProcessSlot = uninit.as_mut_ptr();
+    let root: *mut ProcessRoot = unsafe { &raw mut (*slot).root };
+    let data: *mut RwLock<ProcessData> = unsafe { &raw mut (*slot).data };
+    let dict: *mut ProcessDict = unsafe { &raw mut (*slot).dict };
+
+    unsafe {
+      root.write(ProcessRoot { id: target_pid });
+    }
+
+    unsafe {
+      data.write(RwLock::new(ProcessData {
+        pflags: flags,
+        task: None,
+        name: None,
+        spawn_parent: parent_pid,
+        group_leader: leader_pid,
+      }));
+    }
+
+    unsafe {
+      dict.write(ProcessDict::new());
+    }
+  };
+
+  let Ok(slot) = REGISTERED_PROCS.insert(initialize) else {
+    raise!(Error, SysCap, "spawn_opt/2 - too many processes");
+  };
+
+  // ---------------------------------------------------------------------------
+  // 3. Create Process Task
+  // ---------------------------------------------------------------------------
+
+  let context: ProcessTask = ProcessTask {
+    slot: Arc::clone(&slot),
+  };
+
+  if let Some(parent) = parent_pid {
+    println!("[errai] New Process {target_pid} Spawned by {parent}");
+  }
+
+  let local: TaskLocalFuture<ProcessTask, _> = Process::scope(context, async move {
+    if let Err(error) = CatchUnwind::new(AssertUnwindSafe(future)).await {
+      println!("TODO: Handle Exit Err");
+    } else {
+      println!("TODO: Handle Exit Ok");
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 4. Link State <-> Task
+  // ---------------------------------------------------------------------------
+
+  slot.data.write().task = Some(task::spawn(local));
+
+  // ---------------------------------------------------------------------------
+  // 5. Return
+  // ---------------------------------------------------------------------------
+
+  SpawnHandle::Process(target_pid)
+}
+
+// -----------------------------------------------------------------------------
 // Local Name Registration
 //
 // BEAM Builtin:
@@ -165,7 +285,7 @@ pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: At
   // ---------------------------------------------------------------------------
 
   if name == Atom::UNDEFINED {
-    raise!(ArgumentError, "badarg", "register/2 - reserved name");
+    raise!(Error, BadArg, "register/2 - reserved name");
   }
 
   // ---------------------------------------------------------------------------
@@ -179,7 +299,7 @@ pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: At
   // ---------------------------------------------------------------------------
 
   let Entry::Vacant(name_entry) = name_guard.entry(name) else {
-    raise!(ArgumentError, "badarg", "register/2 - registered name");
+    raise!(Error, BadArg, "register/2 - registered name");
   };
 
   // ---------------------------------------------------------------------------
@@ -193,7 +313,7 @@ pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: At
     this = process;
   } else {
     let Some(context) = REGISTERED_PROCS.get(pid.bits()) else {
-      raise!(ArgumentError, "badarg", "register/2 - PID not alive");
+      raise!(Error, BadArg, "register/2 - PID not alive");
     };
 
     hold = context;
@@ -211,7 +331,7 @@ pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: At
   // ---------------------------------------------------------------------------
 
   if proc_guard.name.is_some() {
-    raise!(ArgumentError, "badarg", "register/2 - registered PID");
+    raise!(Error, BadArg, "register/2 - registered PID");
   }
 
   proc_guard.name = Some(name);
@@ -238,7 +358,7 @@ pub(crate) fn process_unregister(process: &ProcessTask, name: Atom) {
   // ---------------------------------------------------------------------------
 
   let Entry::Occupied(name_entry) = name_guard.entry(name) else {
-    raise!(ArgumentError, "badarg", "unregister/1 - unregistered name");
+    raise!(Error, BadArg, "unregister/1 - unregistered name");
   };
 
   // ---------------------------------------------------------------------------
@@ -253,7 +373,7 @@ pub(crate) fn process_unregister(process: &ProcessTask, name: Atom) {
   } else {
     let Some(context) = REGISTERED_PROCS.get(name_entry.get().bits()) else {
       // TODO: This should be unreachable (?)
-      raise!(ArgumentError, "badarg", "unregister/1 - PID not alive");
+      raise!(Error, BadArg, "unregister/1 - PID not alive");
     };
 
     hold = context;

@@ -1,5 +1,6 @@
 use bitflags::bitflags;
 use std::time::Duration;
+use tokio::task::futures::TaskLocalFuture;
 use tokio::time;
 
 use crate::bifs;
@@ -72,6 +73,15 @@ bitflags! {
 pub struct Process;
 
 impl Process {
+  /// Sets the task-local process context.
+  #[inline]
+  pub(crate) fn scope<F>(task: ProcessTask, future: F) -> TaskLocalFuture<ProcessTask, F>
+  where
+    F: Future,
+  {
+    CONTEXT.scope(task, future)
+  }
+
   // ---------------------------------------------------------------------------
   // General API
   // ---------------------------------------------------------------------------
@@ -204,7 +214,7 @@ impl Process {
   where
     F: Future<Output = ()> + Send + 'static,
   {
-    todo!()
+    CONTEXT.with(|this| bifs::process_spawn(this, options, future))
   }
 
   /// Sends `message` to the given `destination`.
@@ -213,7 +223,9 @@ impl Process {
   ///
   /// # Errors
   ///
-  /// Raises [`ArgumentError`] if the destination is an unregistered name.
+  /// Raises [`Exception`] if the destination is an unregistered name.
+  ///
+  /// [`Exception`]: crate::core::Exception
   pub fn send<M>(destination: impl Into<ExternalDest>, message: M)
   where
     M: Send + 'static,
@@ -360,11 +372,13 @@ impl Process {
   ///
   /// # Errors
   ///
-  /// Raises [`ArgumentError`] in the following cases:
+  /// Raises [`Exception`] in the following cases:
   ///
   /// - The PID is not alive
   /// - The PID is currently registered under a different name
   /// - The name is already registered to another PID
+  ///
+  /// [`Exception`]: crate::core::Exception
   pub fn register(pid: InternalPid, name: impl Into<Atom>) {
     CONTEXT.with(|this| bifs::process_register(this, pid, name.into()))
   }
@@ -375,7 +389,9 @@ impl Process {
   ///
   /// # Errors
   ///
-  /// Raises [`ArgumentError`] if the name is not registered to any PID.
+  /// Raises [`Exception`] if the name is not registered to any PID.
+  ///
+  /// [`Exception`]: crate::core::Exception
   pub fn unregister(name: impl Into<Atom>) {
     CONTEXT.with(|this| bifs::process_unregister(this, name.into()))
   }
