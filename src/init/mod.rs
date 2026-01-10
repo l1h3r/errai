@@ -1,6 +1,8 @@
 //! Errai runtime initialization and lifecycle management
 
 use std::io::Error;
+use std::panic;
+use std::panic::PanicHookInfo;
 use std::process;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
@@ -18,6 +20,8 @@ use crate::erts::Process;
 use crate::erts::ProcessFlags;
 use crate::lang::InternalPid;
 use crate::lang::Term;
+
+type PanicHook = Box<dyn Fn(&PanicHookInfo<'_>) + Sync + Send + 'static>;
 
 // A conservative default of the number of CPUs on the running machine.
 const DEFAULT_CPUS: usize = 1;
@@ -47,6 +51,13 @@ pub fn block_on<F>(future: F) -> !
 where
   F: Future<Output = ()> + Send + 'static,
 {
+  let hook: PanicHook = panic::take_hook();
+
+  panic::set_hook(Box::new(move |info| {
+    eprintln!("[errai]: Unhandled panic: {info:?}");
+    hook(info);
+  }));
+
   let runtime: Runtime = match build_runtime() {
     Ok(runtime) => runtime,
     Err(error) => {
