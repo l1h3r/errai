@@ -14,7 +14,7 @@ pub struct Term {
 }
 
 impl Term {
-  /// Creates a new `Term`.
+  /// Creates a new `Term` from the given `data`.
   #[inline]
   pub fn new<T>(data: T) -> Self
   where
@@ -25,9 +25,9 @@ impl Term {
     }
   }
 
-  /// Creates a new `Term` from the given `error`.
+  /// Creates a new `Term` from a dynamic error value.
   #[inline]
-  pub(crate) fn new_error(error: Box<dyn Any + Send>) -> Self {
+  pub fn new_error(error: Box<dyn Any + Send>) -> Self {
     match error.downcast::<&str>() {
       Ok(error) => Self::new(error),
       Err(error) => match error.downcast::<String>() {
@@ -37,7 +37,7 @@ impl Term {
     }
   }
 
-  /// Returns `true` if the inner type is the same as `T`.
+  /// Returns `true` if the inner type matches `T`.
   #[inline]
   pub fn is<T>(&self) -> bool
   where
@@ -66,7 +66,7 @@ impl Term {
 
   /// Downcasts the boxed term to a concrete type.
   ///
-  /// Safety
+  /// # Safety
   ///
   /// The contained value must be of type `T`. Calling this method with the
   /// incorrect type is undefined behavior.

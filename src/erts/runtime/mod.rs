@@ -1,9 +1,74 @@
 use std::time::Duration;
 
+use crate::erts::ProcessSlot;
+use crate::erts::ProcessTable;
+
 /// Errai runtime API.
 pub struct Runtime;
 
 impl Runtime {
+  // ---------------------------------------------------------------------------
+  // Exit Codes
+  // ---------------------------------------------------------------------------
+
+  /// Execution success.
+  pub const E_CODE_SUCCESS: i32 = 0;
+  /// Initialization failure.
+  pub const E_CODE_FAILURE_INIT: i32 = -1;
+  /// Execution failure.
+  pub const E_CODE_FAILURE_EXEC: i32 = -2;
+
+  // ---------------------------------------------------------------------------
+  // Types
+  // ---------------------------------------------------------------------------
+
+  /// Maximum number of characters in an [`Atom`], currently not enforced.
+  ///
+  /// [`Atom`]: crate::lang::Atom
+  pub const MAX_ATOM_CHARS: usize = 255;
+  /// Maximum number of [`Atom`]s, currently not enforced.
+  ///
+  /// [`Atom`]: crate::lang::Atom
+  pub const MAX_ATOM_COUNT: usize = 1 << 20;
+
+  // ---------------------------------------------------------------------------
+  // System
+  // ---------------------------------------------------------------------------
+
+  /// Default amount of parallelism the tokio runtime should use.
+  ///
+  /// Note: This value is only used when a default value is not
+  ///       retrievable from the host environment.
+  pub const DEFAULT_PARALLELISM: usize = 1;
+  /// Number of scheduler ticks before polling for external events.
+  pub const DEFAULT_EVENT_INTERVAL: u32 = 61;
+  /// Number of scheduler ticks before polling the global task queue.
+  pub const DEFAULT_GLOBAL_QUEUE_INTERVAL: u32 = 31;
+  /// Limit for additional threads spawned by the tokio runtime.
+  pub const DEFAULT_MAX_BLOCKING_THREADS: usize = 512;
+  /// Maximum number of I/O events processed per scheduler tick.
+  pub const DEFAULT_MAX_IO_EVENTS_PER_TICK: usize = 1024;
+  /// How long to keep threads in the blocking pool alive.
+  pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_millis(10 * 1000);
+  /// Stack size (in bytes) for worker threads.
+  pub const DEFAULT_THREAD_STACK_SIZE: usize = 2 * 1024 * 1024;
+
+  /// Number of pre-allocated entries in the process dictionary.
+  pub(crate) const CAP_PROC_DICTIONARY: usize = 8;
+  // Number of pre-allocated process states.
+  pub(crate) const CAP_REGISTERED_PROCS: usize = ProcessTable::<ProcessSlot>::DEF_ENTRIES;
+  // Number of pre-allocated registered names.
+  pub(crate) const CAP_REGISTERED_NAMES: usize = ProcessTable::<ProcessSlot>::MIN_ENTRIES;
+
+  pub(crate) const SPAWN_INIT_LINK: bool = false;
+  pub(crate) const SPAWN_INIT_MONITOR: bool = false;
+  pub(crate) const SPAWN_INIT_ASYNC_DIST: bool = false;
+  pub(crate) const SPAWN_INIT_TRAP_EXIT: bool = false;
+
+  // ---------------------------------------------------------------------------
+  // Runtime API
+  // ---------------------------------------------------------------------------
+
   /// Forcefully stops the Errai runtime system.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#halt/2>

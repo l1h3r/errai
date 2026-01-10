@@ -14,7 +14,7 @@ impl Atom {
   /// The atom `undefined`.
   pub const UNDEFINED: Self = Self::new("undefined");
 
-  /// Creates a new `Atom`.
+  /// Creates a new `Atom` from the given `data`.
   #[inline]
   pub const fn new(data: &'static str) -> Self {
     Self { data }

@@ -1,3 +1,5 @@
+use crate::erts::Runtime;
+
 /// Options used to configure a spawned process.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct SpawnConfig {
@@ -27,10 +29,10 @@ impl SpawnConfig {
   #[inline]
   pub const fn new() -> Self {
     Self {
-      link: false,
-      monitor: false,
-      async_dist: false,
-      trap_exit: false,
+      link: Runtime::SPAWN_INIT_LINK,
+      monitor: Runtime::SPAWN_INIT_MONITOR,
+      async_dist: Runtime::SPAWN_INIT_ASYNC_DIST,
+      trap_exit: Runtime::SPAWN_INIT_TRAP_EXIT,
     }
   }
 

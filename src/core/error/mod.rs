@@ -10,7 +10,7 @@ use std::fmt::Result;
 // -----------------------------------------------------------------------------
 
 macro_rules! raise {
-  ($class:ident, $group:ident, $error:literal $(,)?) => {
+  ($class:ident, $group:ident, $error:expr $(,)?) => {
     ::std::panic!(
       "{}",
       $crate::core::Exception::new(
@@ -18,7 +18,7 @@ macro_rules! raise {
         $crate::core::ExceptionGroup::$group,
         $error,
       ),
-    );
+    )
   };
 }
 

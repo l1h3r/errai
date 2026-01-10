@@ -22,6 +22,7 @@ use crate::erts::ProcessRoot;
 use crate::erts::ProcessSlot;
 use crate::erts::ProcessTable;
 use crate::erts::ProcessTask;
+use crate::erts::Runtime;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
 use crate::lang::Atom;
@@ -29,19 +30,13 @@ use crate::lang::InternalPid;
 use crate::lang::RawPid;
 use crate::lang::Term;
 
-// The number of pre-allocated process states.
-const CAP_REGISTERED_PROCS: usize = ProcessTable::<ProcessSlot>::DEF_ENTRIES;
-
-// The number of pre-allocated registered names.
-const CAP_REGISTERED_NAMES: usize = ProcessTable::<ProcessSlot>::MIN_ENTRIES;
-
 // A table mapping internal process identifiers to process data.
 static REGISTERED_PROCS: LazyLock<ProcessTable<ProcessSlot>> =
-  LazyLock::new(|| ProcessTable::with_capacity(CAP_REGISTERED_PROCS));
+  LazyLock::new(|| ProcessTable::with_capacity(Runtime::CAP_REGISTERED_PROCS));
 
 // A table mapping registered names to internal process identifiers.
 static REGISTERED_NAMES: LazyLock<RwLock<HashMap<Atom, InternalPid>>> =
-  LazyLock::new(|| RwLock::new(HashMap::with_capacity(CAP_REGISTERED_NAMES)));
+  LazyLock::new(|| RwLock::new(HashMap::with_capacity(Runtime::CAP_REGISTERED_NAMES)));
 
 // -----------------------------------------------------------------------------
 // Common Utilities

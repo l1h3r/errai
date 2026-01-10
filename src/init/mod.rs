@@ -7,9 +7,8 @@ use std::process;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::thread;
-use std::time::Duration;
 use tokio::runtime::Builder;
-use tokio::runtime::Runtime;
+use tokio::runtime::Runtime as TokioRuntime;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::oneshot::Sender;
@@ -18,26 +17,11 @@ use crate::bifs;
 use crate::erts::Message;
 use crate::erts::Process;
 use crate::erts::ProcessFlags;
+use crate::erts::Runtime;
 use crate::lang::InternalPid;
 use crate::lang::Term;
 
 type PanicHook = Box<dyn Fn(&PanicHookInfo<'_>) + Sync + Send + 'static>;
-
-// A conservative default of the number of CPUs on the running machine.
-const DEFAULT_CPUS: usize = 1;
-
-// Default runtime configuration
-const DEFAULT_EVENT_INTERVAL: u32 = 61;
-const DEFAULT_GLOBAL_QUEUE_INTERVAL: u32 = 31;
-const DEFAULT_MAX_BLOCKING_THREADS: usize = 512;
-const DEFAULT_MAX_IO_EVENTS_PER_TICK: usize = 1024;
-const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_millis(10 * 1000);
-const DEFAULT_THREAD_STACK_SIZE: usize = 2 * 1024 * 1024;
-
-// Error codes used to terminate the running process.
-const ERR_CODE_SUCCESS: i32 = 0;
-const ERR_CODE_FAILURE_INIT: i32 = -1;
-const ERR_CODE_FAILURE_EXEC: i32 = -2;
 
 // Counter used to generate unique names for worker threads
 static WORKER_ID: AtomicU32 = AtomicU32::new(1);
@@ -58,11 +42,11 @@ where
     hook(info);
   }));
 
-  let runtime: Runtime = match build_runtime() {
+  let runtime: TokioRuntime = match build_runtime() {
     Ok(runtime) => runtime,
     Err(error) => {
       eprintln!("[errai]: Failed to build runtime: {error}");
-      process::exit(ERR_CODE_FAILURE_INIT);
+      process::exit(Runtime::E_CODE_FAILURE_INIT);
     }
   };
 
@@ -106,13 +90,13 @@ where
 
   if let Err(error) = runtime.block_on(task) {
     eprintln!("[errai]: Failed to run application: {error}");
-    process::exit(ERR_CODE_FAILURE_EXEC);
+    process::exit(Runtime::E_CODE_FAILURE_EXEC);
   } else {
-    process::exit(ERR_CODE_SUCCESS);
+    process::exit(Runtime::E_CODE_SUCCESS);
   }
 }
 
-fn build_runtime() -> Result<Runtime, Error> {
+fn build_runtime() -> Result<TokioRuntime, Error> {
   // TODO: Maybe try and make use of the following hooks:
   //   - on_after_task_poll
   //   - on_before_task_poll
@@ -125,13 +109,13 @@ fn build_runtime() -> Result<Runtime, Error> {
   Builder::new_multi_thread()
     .enable_io()
     .enable_time()
-    .event_interval(DEFAULT_EVENT_INTERVAL)
-    .global_queue_interval(DEFAULT_GLOBAL_QUEUE_INTERVAL)
-    .max_blocking_threads(DEFAULT_MAX_BLOCKING_THREADS)
-    .max_io_events_per_tick(DEFAULT_MAX_IO_EVENTS_PER_TICK)
-    .thread_keep_alive(DEFAULT_THREAD_KEEP_ALIVE)
+    .event_interval(Runtime::DEFAULT_EVENT_INTERVAL)
+    .global_queue_interval(Runtime::DEFAULT_GLOBAL_QUEUE_INTERVAL)
+    .max_blocking_threads(Runtime::DEFAULT_MAX_BLOCKING_THREADS)
+    .max_io_events_per_tick(Runtime::DEFAULT_MAX_IO_EVENTS_PER_TICK)
+    .thread_keep_alive(Runtime::DEFAULT_THREAD_KEEP_ALIVE)
     .thread_name_fn(next_worker_name)
-    .thread_stack_size(DEFAULT_THREAD_STACK_SIZE)
+    .thread_stack_size(Runtime::DEFAULT_THREAD_STACK_SIZE)
     .worker_threads(available_cpus())
     .build()
 }
@@ -139,7 +123,7 @@ fn build_runtime() -> Result<Runtime, Error> {
 fn available_cpus() -> usize {
   match thread::available_parallelism() {
     Ok(count) => count.get(),
-    Err(_) => DEFAULT_CPUS,
+    Err(_) => Runtime::DEFAULT_PARALLELISM,
   }
 }
 

@@ -6,6 +6,7 @@ use std::fmt::Result;
 use crate::lang::Term;
 
 /// The reason used to stop the execution of a running process.
+#[derive(Clone)]
 pub enum ExitReason {
   Normal,
   Kill,

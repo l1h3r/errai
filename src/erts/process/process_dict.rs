@@ -3,6 +3,7 @@ use parking_lot::RwLock;
 use std::borrow::Borrow;
 use std::hash::Hash;
 
+use crate::erts::Runtime;
 use crate::lang::Atom;
 use crate::lang::Term;
 
@@ -17,12 +18,9 @@ unsafe impl Send for ProcessDict {}
 unsafe impl Sync for ProcessDict {}
 
 impl ProcessDict {
-  /// The number of pre-allocated entries in the process dictionary.
-  const CAP_DICTIONARY: usize = 8;
-
   #[inline]
   fn alloc_table() -> HashMap<Atom, Term> {
-    HashMap::with_capacity(Self::CAP_DICTIONARY)
+    HashMap::with_capacity(Runtime::CAP_PROC_DICTIONARY)
   }
 
   /// Creates a new `ProcessDict`.
