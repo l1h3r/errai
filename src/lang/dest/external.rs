@@ -112,9 +112,23 @@ impl From<Atom> for ExternalDest {
   }
 }
 
+impl From<&'static str> for ExternalDest {
+  #[inline]
+  fn from(other: &'static str) -> Self {
+    Self::InternalName(Atom::new(other))
+  }
+}
+
 impl From<(Atom, Atom)> for ExternalDest {
   #[inline]
   fn from(other: (Atom, Atom)) -> Self {
     Self::ExternalName(other.0, other.1)
+  }
+}
+
+impl From<(&'static str, &'static str)> for ExternalDest {
+  #[inline]
+  fn from(other: (&'static str, &'static str)) -> Self {
+    Self::ExternalName(Atom::new(other.0), Atom::new(other.1))
   }
 }

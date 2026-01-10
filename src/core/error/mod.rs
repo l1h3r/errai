@@ -43,6 +43,7 @@ pub enum ExceptionClass {
 pub enum ExceptionGroup {
   BadArg,
   SysCap,
+  SysInv,
 }
 
 impl ExceptionGroup {
@@ -51,6 +52,7 @@ impl ExceptionGroup {
     match self {
       Self::BadArg => "(BadArg) errors were found with the given argument(s)",
       Self::SysCap => "(SysCap) a system limit has been reached",
+      Self::SysInv => "(SysInv) a system invariant has been broken",
     }
   }
 }

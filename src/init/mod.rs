@@ -14,10 +14,12 @@ use tokio::sync::oneshot::Receiver;
 use tokio::sync::oneshot::Sender;
 
 use crate::bifs;
-use crate::erts::Message;
+use crate::erts::DynMessage;
 use crate::erts::Process;
 use crate::erts::ProcessFlags;
 use crate::erts::Runtime;
+use crate::lang::DynPid;
+use crate::lang::ExitReason;
 use crate::lang::InternalPid;
 use crate::lang::Term;
 
@@ -69,11 +71,14 @@ where
       let _application: InternalPid = Process::spawn_link(future);
 
       // Block and wait for an exit signal
-      match Process::receive::<Term>().await {
-        Message::Term(_term) => {
+      match Process::receive_any().await {
+        DynMessage::Term(term) => {
           // Ignore messages here, we poll and drop terms to keep the queue small.
         }
-        Message::Exit(sender, reason) => {
+        DynMessage::Exit(exit) => {
+          let sender: &DynPid = exit.sender();
+          let reason: &ExitReason = exit.reason();
+
           println!("[errai]: Shutdown initialized: {sender} because {reason}");
 
           // Tell the parent to begin the shutdown process

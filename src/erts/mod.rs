@@ -1,17 +1,24 @@
 //! Core "erts" types of the Errai runtime system.
 
-mod message;
+mod mailbox;
 mod process;
 mod runtime;
 mod spawn;
 
+pub(crate) use self::mailbox::Disconnected;
+pub(crate) use self::mailbox::ProcessRecv;
+pub(crate) use self::mailbox::ProcessSend;
+pub(crate) use self::mailbox::Signal;
+pub(crate) use self::mailbox::SignalQueue;
 pub(crate) use self::process::ProcessData;
 pub(crate) use self::process::ProcessDict;
 pub(crate) use self::process::ProcessRoot;
 pub(crate) use self::process::ProcessSlot;
 pub(crate) use self::process::ProcessTask;
 
-pub use self::message::Message;
+pub use self::mailbox::DynMessage;
+pub use self::mailbox::ExitMessage;
+pub use self::mailbox::Message;
 pub use self::process::AliasRef;
 pub use self::process::MonitorRef;
 pub use self::process::Process;

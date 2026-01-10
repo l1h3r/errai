@@ -13,19 +13,27 @@ use triomphe::Arc;
 
 use crate::core::CatchUnwind;
 use crate::core::raise;
+use crate::erts::Disconnected;
+use crate::erts::DynMessage;
+use crate::erts::Message;
 use crate::erts::Process;
 use crate::erts::ProcessData;
 use crate::erts::ProcessDict;
 use crate::erts::ProcessFlags;
 use crate::erts::ProcessInfo;
 use crate::erts::ProcessRoot;
+use crate::erts::ProcessSend;
 use crate::erts::ProcessSlot;
 use crate::erts::ProcessTable;
 use crate::erts::ProcessTask;
 use crate::erts::Runtime;
+use crate::erts::Signal;
+use crate::erts::SignalQueue;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
 use crate::lang::Atom;
+use crate::lang::ExternalDest;
+use crate::lang::ExternalPid;
 use crate::lang::InternalPid;
 use crate::lang::RawPid;
 use crate::lang::Term;
@@ -63,7 +71,7 @@ pub(crate) fn process_delete(pid: InternalPid) -> Option<Arc<ProcessSlot>> {
   // 2. Lock Process
   // ---------------------------------------------------------------------------
 
-  let mut proc_guard: RwLockWriteGuard<'_, ProcessData> = slot.data.write();
+  let proc_guard: RwLockWriteGuard<'_, ProcessData> = slot.data.write();
 
   // ---------------------------------------------------------------------------
   // 3. Unregister Process Name
@@ -137,7 +145,7 @@ pub(crate) fn process_info(process: &ProcessTask, pid: InternalPid) -> Option<Pr
   let hold: Arc<ProcessSlot>;
   let this: &ProcessSlot;
 
-  if process.root.id == pid {
+  if process.root.mpid == pid {
     this = process;
   } else {
     let Some(context) = REGISTERED_PROCS.get(pid.bits()) else {
@@ -220,7 +228,7 @@ where
   // Insert a dummy PID for now, the real PID will be given if the insert succeeds.
   let mut target_pid: InternalPid = InternalPid::new(RawPid::from_bits(0));
   let mut leader_pid: InternalPid = target_pid;
-  let parent_pid: Option<InternalPid> = process.map(|process| process.root.id);
+  let parent_pid: Option<InternalPid> = process.map(|process| process.root.mpid);
 
   // Initialize default flags from user-provided options.
   let flags: ProcessFlags = {
@@ -229,6 +237,8 @@ where
     flags.set(ProcessFlags::ASYNC_DIST, options.async_dist);
     flags
   };
+
+  let (send, queue): (ProcessSend, SignalQueue) = SignalQueue::new();
 
   // ---------------------------------------------------------------------------
   // 2. Create Process State
@@ -244,7 +254,10 @@ where
     let dict: *mut ProcessDict = unsafe { &raw mut (*slot).dict };
 
     unsafe {
-      root.write(ProcessRoot { id: target_pid });
+      root.write(ProcessRoot {
+        mpid: target_pid,
+        send,
+      });
     }
 
     unsafe {
@@ -254,6 +267,7 @@ where
         name: None,
         spawn_parent: parent_pid,
         group_leader: leader_pid,
+        signal_queue: queue,
       }));
     }
 
@@ -263,7 +277,7 @@ where
   };
 
   let Ok(slot) = REGISTERED_PROCS.insert(initialize) else {
-    raise!(Error, SysCap, "spawn_opt/2 - too many processes");
+    raise!(Error, SysCap, "too many processes");
   };
 
   // ---------------------------------------------------------------------------
@@ -299,6 +313,110 @@ where
   SpawnHandle::Process(target_pid)
 }
 
+pub(crate) fn process_send(from: &ProcessTask, dest: ExternalDest, term: Term) {
+  match dest {
+    ExternalDest::InternalProc(pid) => process_send_internal_proc(from, pid, term),
+    ExternalDest::ExternalProc(pid) => process_send_external_proc(from, pid, term),
+    ExternalDest::InternalName(name) => process_send_internal_name(from, name, term),
+    ExternalDest::ExternalName(name, node) => process_send_external_name(from, name, node, term),
+  }
+}
+
+fn process_send_internal_proc(from: &ProcessTask, ipid: InternalPid, term: Term) {
+  let Some(dest) = REGISTERED_PROCS.get(ipid.bits()) else {
+    return; // Never fail when sending to a non-existent PID.
+  };
+
+  if let Err(_error) = dest.root.send.send(Signal::Message(from.root.mpid, term)) {
+    raise!(Error, SysInv, "sending on a closed channel");
+  }
+}
+
+fn process_send_external_proc(from: &ProcessTask, epid: ExternalPid, term: Term) {
+  todo!("process_send_external_proc")
+}
+
+fn process_send_internal_name(from: &ProcessTask, name: Atom, term: Term) {
+  if let Some(pid) = process_whereis(name) {
+    process_send_internal_proc(from, pid, term);
+  } else {
+    raise!(Error, BadArg, "unregistered name");
+  }
+}
+
+fn process_send_external_name(from: &ProcessTask, name: Atom, node: Atom, term: Term) {
+  todo!("process_send_external_name")
+}
+
+pub(crate) fn process_receive<T>(
+  process: &ProcessTask,
+) -> impl Future<Output = Message<Box<T>>> + use<T>
+where
+  T: 'static,
+{
+  let pid: InternalPid = process.root.mpid;
+
+  async move {
+    let poll_message: DynMessage = process_poll(pid, DynMessage::is::<T>).await;
+
+    // SAFETY: `DynMessage::is` ensures the message type is valid.
+    let cast_message: Message<Box<T>> = unsafe { poll_message.downcast_unchecked() };
+
+    cast_message
+  }
+}
+
+pub(crate) fn process_receive_exact<T>(
+  process: &ProcessTask,
+) -> impl Future<Output = Box<T>> + use<T>
+where
+  T: 'static,
+{
+  let pid: InternalPid = process.root.mpid;
+
+  async move {
+    let poll_message: DynMessage = process_poll(pid, DynMessage::is_exact::<T>).await;
+
+    // SAFETY: `DynMessage::is_exact` ensures the message type is valid.
+    let cast_message: Box<T> = unsafe { poll_message.downcast_exact_unchecked() };
+
+    cast_message
+  }
+}
+
+pub(crate) async fn process_poll<F>(pid: InternalPid, filter: F) -> DynMessage
+where
+  F: Fn(&DynMessage) -> bool,
+{
+  let internal: Option<DynMessage> = Process::with(|this| {
+    debug_assert!(this.root.mpid == pid);
+    this.data.write().signal_queue.poll_internal(&filter)
+  });
+
+  if let Some(message) = internal {
+    return message;
+  }
+
+  'external: loop {
+    let external: Option<DynMessage> = Process::with(|this| {
+      debug_assert!(this.root.mpid == pid);
+
+      let mut guard: RwLockWriteGuard<'_, ProcessData> = this.data.write();
+
+      match guard.signal_queue.poll_external(&filter) {
+        Ok(message) => message,
+        Err(Disconnected) => raise!(Error, SysInv, "receiving on a closed channel"),
+      }
+    });
+
+    if let Some(message) = external {
+      break 'external message;
+    }
+
+    task::yield_now().await;
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Local Name Registration
 //
@@ -314,7 +432,7 @@ pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: At
   // ---------------------------------------------------------------------------
 
   if name == Atom::UNDEFINED {
-    raise!(Error, BadArg, "register/2 - reserved name");
+    raise!(Error, BadArg, "reserved name");
   }
 
   // ---------------------------------------------------------------------------
@@ -328,7 +446,7 @@ pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: At
   // ---------------------------------------------------------------------------
 
   let Entry::Vacant(name_entry) = name_guard.entry(name) else {
-    raise!(Error, BadArg, "register/2 - registered name");
+    raise!(Error, BadArg, "registered name");
   };
 
   // ---------------------------------------------------------------------------
@@ -338,11 +456,11 @@ pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: At
   let hold: Arc<ProcessSlot>;
   let this: &ProcessSlot;
 
-  if process.root.id == pid {
+  if process.root.mpid == pid {
     this = process;
   } else {
     let Some(context) = REGISTERED_PROCS.get(pid.bits()) else {
-      raise!(Error, BadArg, "register/2 - PID not alive");
+      raise!(Error, BadArg, "PID not alive");
     };
 
     hold = context;
@@ -360,7 +478,7 @@ pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: At
   // ---------------------------------------------------------------------------
 
   if proc_guard.name.is_some() {
-    raise!(Error, BadArg, "register/2 - registered PID");
+    raise!(Error, BadArg, "registered PID");
   }
 
   proc_guard.name = Some(name);
@@ -387,7 +505,7 @@ pub(crate) fn process_unregister(process: &ProcessTask, name: Atom) {
   // ---------------------------------------------------------------------------
 
   let Entry::Occupied(name_entry) = name_guard.entry(name) else {
-    raise!(Error, BadArg, "unregister/1 - unregistered name");
+    raise!(Error, BadArg, "unregistered name");
   };
 
   // ---------------------------------------------------------------------------
@@ -397,12 +515,12 @@ pub(crate) fn process_unregister(process: &ProcessTask, name: Atom) {
   let hold: Arc<ProcessSlot>;
   let this: &ProcessSlot;
 
-  if process.root.id == *name_entry.get() {
+  if process.root.mpid == *name_entry.get() {
     this = process;
   } else {
     let Some(context) = REGISTERED_PROCS.get(name_entry.get().bits()) else {
       // TODO: This should be unreachable (?)
-      raise!(Error, BadArg, "unregister/1 - PID not alive");
+      raise!(Error, BadArg, "PID not alive");
     };
 
     hold = context;

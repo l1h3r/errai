@@ -4,6 +4,8 @@ use tokio::task::futures::TaskLocalFuture;
 use tokio::time;
 
 use crate::bifs;
+use crate::core::raise;
+use crate::erts::DynMessage;
 use crate::erts::Message;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
@@ -14,6 +16,7 @@ use crate::lang::ExternalDest;
 use crate::lang::InternalDest;
 use crate::lang::InternalPid;
 use crate::lang::InternalRef;
+use crate::lang::Item;
 use crate::lang::Term;
 
 mod process_data;
@@ -82,6 +85,18 @@ impl Process {
     CONTEXT.scope(task, future)
   }
 
+  /// Accesses the current task-local process context and runs the given function.
+  #[inline]
+  pub(crate) fn with<F, R>(f: F) -> R
+  where
+    F: FnOnce(&ProcessTask) -> R,
+  {
+    match CONTEXT.try_with(f) {
+      Ok(result) => result,
+      Err(error) => raise!(Error, SysInv, "task-local value not set"),
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // General API
   // ---------------------------------------------------------------------------
@@ -90,7 +105,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#self/0>
   pub fn this() -> InternalPid {
-    CONTEXT.with(|this| this.slot.root.id)
+    Self::with(|this| this.root.mpid)
   }
 
   /// Returns a list of process identifiers corresponding to all the
@@ -129,21 +144,21 @@ impl Process {
   ///
   /// REF: **N/A**
   pub fn get_flags() -> ProcessFlags {
-    CONTEXT.with(|this| bifs::process_get_flags(this))
+    Self::with(|this| bifs::process_get_flags(this))
   }
 
   /// Sets the process flags of the calling process.
   ///
   /// REF: **N/A**
   pub fn set_flags(flags: ProcessFlags) {
-    CONTEXT.with(|this| bifs::process_set_flags(this, flags))
+    Self::with(|this| bifs::process_set_flags(this, flags))
   }
 
   /// Sets the process flag indicated to the specified value.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_flag/2>
   pub fn set_flag(flag: ProcessFlags, value: bool) {
-    CONTEXT.with(|this| bifs::process_set_flag(this, flag, value))
+    Self::with(|this| bifs::process_set_flag(this, flag, value))
   }
 
   /// Returns information about the process identified by `pid`.
@@ -152,7 +167,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_info/1>
   pub fn info(pid: InternalPid) -> Option<ProcessInfo> {
-    CONTEXT.with(|this| bifs::process_info(this, pid))
+    Self::with(|this| bifs::process_info(this, pid))
   }
 
   // ---------------------------------------------------------------------------
@@ -214,7 +229,7 @@ impl Process {
   where
     F: Future<Output = ()> + Send + 'static,
   {
-    CONTEXT.with(|this| bifs::process_spawn(this, options, future))
+    Self::with(|this| bifs::process_spawn(this, options, future))
   }
 
   /// Sends `message` to the given `destination`.
@@ -226,22 +241,40 @@ impl Process {
   /// Raises [`Exception`] if the destination is an unregistered name.
   ///
   /// [`Exception`]: crate::core::Exception
-  pub fn send<M>(destination: impl Into<ExternalDest>, message: M)
+  pub fn send<M>(dest: impl Into<ExternalDest>, term: M)
   where
-    M: Send + 'static,
+    M: Item,
   {
-    todo!("send/2")
+    Self::with(|this| bifs::process_send(this, dest.into(), Term::new(term)))
   }
 
   /// Checks if there is a message matching the given type `T` in the mailbox of
   /// the current process.
   ///
   /// REF: <https://www.erlang.org/doc/system/expressions.html#receive>
-  pub async fn receive<T>() -> Message<T>
+  pub async fn receive<T>() -> Message<Box<T>>
   where
     T: 'static,
   {
-    todo!("receive/0")
+    Self::with(|this| bifs::process_receive::<T>(this)).await
+  }
+
+  /// Checks if there is a message matching the given type `T` in the mailbox of
+  /// the current process.
+  ///
+  /// REF: <https://www.erlang.org/doc/system/expressions.html#receive>
+  pub async fn receive_exact<T>() -> Box<T>
+  where
+    T: 'static,
+  {
+    Self::with(|this| bifs::process_receive_exact::<T>(this)).await
+  }
+
+  /// Checks if there is a message in the mailbox of the current process.
+  ///
+  /// REF: <https://www.erlang.org/doc/system/expressions.html#receive>
+  pub async fn receive_any() -> DynMessage {
+    Self::with(|this| bifs::process_poll(this.root.mpid, |_| true)).await
   }
 
   // ---------------------------------------------------------------------------
@@ -380,7 +413,7 @@ impl Process {
   ///
   /// [`Exception`]: crate::core::Exception
   pub fn register(pid: InternalPid, name: impl Into<Atom>) {
-    CONTEXT.with(|this| bifs::process_register(this, pid, name.into()))
+    Self::with(|this| bifs::process_register(this, pid, name.into()))
   }
 
   /// Removes the registered `name`, associated with a PID.
@@ -393,7 +426,7 @@ impl Process {
   ///
   /// [`Exception`]: crate::core::Exception
   pub fn unregister(name: impl Into<Atom>) {
-    CONTEXT.with(|this| bifs::process_unregister(this, name.into()))
+    Self::with(|this| bifs::process_unregister(this, name.into()))
   }
 
   /// Returns the PID under `name`, or `None` if the name is not registered.
@@ -421,7 +454,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#put/2>
   pub fn put(key: impl Into<Atom>, value: impl Into<Term>) -> Option<Term> {
-    CONTEXT.with(|this| bifs::process_dict_put(this, key.into(), value.into()))
+    Self::with(|this| bifs::process_dict_put(this, key.into(), value.into()))
   }
 
   /// Returns the value for the given `key` in the process dictionary,
@@ -429,7 +462,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get/1>
   pub fn get(key: impl Into<Atom>) -> Option<Term> {
-    CONTEXT.with(|this| bifs::process_dict_get(this, key.into()))
+    Self::with(|this| bifs::process_dict_get(this, key.into()))
   }
 
   /// Deletes the given `key` from the process dictionary.
@@ -439,34 +472,34 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#erase/1>
   pub fn delete(key: impl Into<Atom>) -> Option<Term> {
-    CONTEXT.with(|this| bifs::process_dict_delete(this, key.into()))
+    Self::with(|this| bifs::process_dict_delete(this, key.into()))
   }
 
   /// Clears the prcoess dictionary and returns the previous key-value pairs.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#erase/0>
   pub fn clear() -> Vec<(Atom, Term)> {
-    CONTEXT.with(|this| bifs::process_dict_clear(this))
+    Self::with(|this| bifs::process_dict_clear(this))
   }
 
   /// Returns a list of all key-value pairs in the process dictionary.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get/0>
   pub fn pairs() -> Vec<(Atom, Term)> {
-    CONTEXT.with(|this| bifs::process_dict_pairs(this))
+    Self::with(|this| bifs::process_dict_pairs(this))
   }
 
   /// Returns a list of all keys in the process dictionary.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get_keys/0>
   pub fn keys() -> Vec<Atom> {
-    CONTEXT.with(|this| bifs::process_dict_keys(this))
+    Self::with(|this| bifs::process_dict_keys(this))
   }
 
   /// Returns a list of all values in the process dictionary.
   ///
   /// REF: **N/A**
   pub fn values() -> Vec<Term> {
-    CONTEXT.with(|this| bifs::process_dict_values(this))
+    Self::with(|this| bifs::process_dict_values(this))
   }
 }

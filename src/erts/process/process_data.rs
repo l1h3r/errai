@@ -6,6 +6,8 @@ use triomphe::Arc;
 use crate::bifs;
 use crate::erts::ProcessDict;
 use crate::erts::ProcessFlags;
+use crate::erts::ProcessSend;
+use crate::erts::SignalQueue;
 use crate::lang::Atom;
 use crate::lang::InternalPid;
 
@@ -16,7 +18,8 @@ use crate::lang::InternalPid;
 #[derive(Debug)]
 #[repr(C)]
 pub(crate) struct ProcessRoot {
-  pub(crate) id: InternalPid,
+  pub(crate) mpid: InternalPid,
+  pub(crate) send: ProcessSend,
 }
 
 // -----------------------------------------------------------------------------
@@ -37,6 +40,7 @@ pub(crate) struct ProcessData {
   pub(crate) name: Option<Atom>,
   pub(crate) spawn_parent: Option<InternalPid>,
   pub(crate) group_leader: InternalPid,
+  pub(crate) signal_queue: SignalQueue,
 }
 
 // -----------------------------------------------------------------------------
@@ -64,8 +68,8 @@ pub(crate) struct ProcessTask {
 
 impl Drop for ProcessTask {
   fn drop(&mut self) {
-    if bifs::process_delete(self.slot.root.id).is_none() {
-      eprintln!("[errai]: Dangling Process ({})", self.slot.root.id);
+    if bifs::process_delete(self.root.mpid).is_none() {
+      eprintln!("[errai]: Dangling Process ({})", self.root.mpid);
     }
   }
 }

@@ -60,3 +60,10 @@ impl From<Atom> for InternalDest {
     Self::Name(other)
   }
 }
+
+impl From<&'static str> for InternalDest {
+  #[inline]
+  fn from(other: &'static str) -> Self {
+    Self::Name(Atom::new(other))
+  }
+}
