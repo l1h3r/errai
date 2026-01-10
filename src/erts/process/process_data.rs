@@ -57,7 +57,7 @@ pub(crate) struct ProcessSlot {
 // -----------------------------------------------------------------------------
 
 #[derive(Debug)]
-#[repr(C)]
+#[repr(transparent)]
 pub(crate) struct ProcessTask {
   pub(crate) slot: Arc<ProcessSlot>,
 }
