@@ -58,12 +58,13 @@ impl Runtime {
 
   /// Number of pre-allocated entries in the process dictionary.
   pub(crate) const CAP_PROC_DICTIONARY: usize = 8;
+  // Number of pre-allocated slots in the internal message buffer.
+  pub(crate) const CAP_PROC_MSG_BUFFER: usize = 8;
+
   // Number of pre-allocated process states.
   pub(crate) const CAP_REGISTERED_PROCS: usize = ProcessTable::<ProcessSlot>::DEF_ENTRIES;
   // Number of pre-allocated registered names.
   pub(crate) const CAP_REGISTERED_NAMES: usize = ProcessTable::<ProcessSlot>::MIN_ENTRIES;
-  // Number of pre-allocated slots in the internal signal queue.
-  pub(crate) const CAP_SIG_QUEUE_INTERNAL: usize = 8;
 
   pub(crate) const SPAWN_INIT_LINK: bool = false;
   pub(crate) const SPAWN_INIT_MONITOR: bool = false;

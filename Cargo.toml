@@ -31,7 +31,7 @@ dyn-clone = { version = "1.0", default-features = false }
 hashbrown = { version = "0.16", default-features = false, features = ["default-hasher", "inline-more"] }
 parking_lot = { version = "0.12", default-features = false }
 pin-project-lite = { version = "0.2", default-features = false }
-tokio = { version = "1.49", default-features = false, features = ["net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.49", default-features = false, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "fmt", "std"] }
 triomphe = { version = "0.1", default-features = false }

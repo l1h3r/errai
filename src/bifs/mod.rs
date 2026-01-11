@@ -3,6 +3,7 @@ use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
 use parking_lot::RwLock;
 use parking_lot::RwLockReadGuard;
+use parking_lot::RwLockUpgradableReadGuard;
 use parking_lot::RwLockWriteGuard;
 use std::mem::MaybeUninit;
 use std::panic::AssertUnwindSafe;
@@ -13,7 +14,6 @@ use triomphe::Arc;
 
 use crate::core::CatchUnwind;
 use crate::core::raise;
-use crate::erts::Disconnected;
 use crate::erts::DynMessage;
 use crate::erts::Message;
 use crate::erts::Process;
@@ -21,17 +21,18 @@ use crate::erts::ProcessData;
 use crate::erts::ProcessDict;
 use crate::erts::ProcessFlags;
 use crate::erts::ProcessInfo;
-use crate::erts::ProcessRoot;
+use crate::erts::ProcessRecv;
 use crate::erts::ProcessSend;
 use crate::erts::ProcessSlot;
 use crate::erts::ProcessTable;
 use crate::erts::ProcessTask;
 use crate::erts::Runtime;
 use crate::erts::Signal;
-use crate::erts::SignalQueue;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
+use crate::erts::unbounded_channel;
 use crate::lang::Atom;
+use crate::lang::ExitReason;
 use crate::lang::ExternalDest;
 use crate::lang::ExternalPid;
 use crate::lang::InternalPid;
@@ -119,7 +120,7 @@ pub(crate) fn process_list() -> Vec<InternalPid> {
 // BEAM Builtin: N/A
 pub(crate) fn process_get_flags(process: &ProcessTask) -> ProcessFlags {
   let guard: RwLockReadGuard<'_, ProcessData> = process.data.read();
-  let value: ProcessFlags = guard.pflags;
+  let value: ProcessFlags = guard.flags;
 
   drop(guard);
 
@@ -128,12 +129,12 @@ pub(crate) fn process_get_flags(process: &ProcessTask) -> ProcessFlags {
 
 // BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2013
 pub(crate) fn process_set_flags(process: &ProcessTask, flags: ProcessFlags) {
-  process.data.write().pflags = flags;
+  process.data.write().flags = flags;
 }
 
 // BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2013
 pub(crate) fn process_set_flag(process: &ProcessTask, flag: ProcessFlags, value: bool) {
-  process.data.write().pflags.set(flag, value);
+  process.data.write().flags.set(flag, value);
 }
 
 // BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_bif_info.c#L1558
@@ -145,7 +146,7 @@ pub(crate) fn process_info(process: &ProcessTask, pid: InternalPid) -> Option<Pr
   let hold: Arc<ProcessSlot>;
   let this: &ProcessSlot;
 
-  if process.root.mpid == pid {
+  if process.mpid == pid {
     this = process;
   } else {
     let Some(context) = REGISTERED_PROCS.get(pid.bits()) else {
@@ -167,12 +168,12 @@ pub(crate) fn process_info(process: &ProcessTask, pid: InternalPid) -> Option<Pr
   // ---------------------------------------------------------------------------
 
   let info: ProcessInfo = ProcessInfo {
-    async_dist: guard.pflags.contains(ProcessFlags::ASYNC_DIST),
+    async_dist: guard.flags.contains(ProcessFlags::ASYNC_DIST),
     dictionary: HashMap::from_iter(this.dict.pairs()),
     pid_group_leader: guard.group_leader,
-    pid_spawn_parent: guard.spawn_parent,
+    pid_spawn_parent: this.root,
     registered_name: guard.name,
-    trap_exit: guard.pflags.contains(ProcessFlags::TRAP_EXIT),
+    trap_exit: guard.flags.contains(ProcessFlags::TRAP_EXIT),
   };
 
   // ---------------------------------------------------------------------------
@@ -228,7 +229,7 @@ where
   // Insert a dummy PID for now, the real PID will be given if the insert succeeds.
   let mut target_pid: InternalPid = InternalPid::new(RawPid::from_bits(0));
   let mut leader_pid: InternalPid = target_pid;
-  let parent_pid: Option<InternalPid> = process.map(|process| process.root.mpid);
+  let parent_pid: Option<InternalPid> = process.map(|process| process.mpid);
 
   // Initialize default flags from user-provided options.
   let flags: ProcessFlags = {
@@ -238,7 +239,18 @@ where
     flags
   };
 
-  let (send, queue): (ProcessSend, SignalQueue) = SignalQueue::new();
+  let data: ProcessData = ProcessData {
+    flags,
+    exit: None,
+    name: None,
+    task: None,
+    group_leader: leader_pid,
+    inbox_buffer: Vec::with_capacity(Runtime::CAP_PROC_MSG_BUFFER),
+  };
+
+  let dict: ProcessDict = ProcessDict::new();
+
+  let (sig_send, sig_recv): (ProcessSend, ProcessRecv) = unbounded_channel();
 
   // ---------------------------------------------------------------------------
   // 2. Create Process State
@@ -249,30 +261,18 @@ where
     leader_pid = parent_pid.unwrap_or(target_pid);
 
     let slot: *mut ProcessSlot = uninit.as_mut_ptr();
-    let root: *mut ProcessRoot = unsafe { &raw mut (*slot).root };
-    let data: *mut RwLock<ProcessData> = unsafe { &raw mut (*slot).data };
-    let dict: *mut ProcessDict = unsafe { &raw mut (*slot).dict };
+
+    let data: RwLock<ProcessData> = RwLock::new(ProcessData {
+      group_leader: leader_pid,
+      ..data
+    });
 
     unsafe {
-      root.write(ProcessRoot {
-        mpid: target_pid,
-        send,
-      });
-    }
-
-    unsafe {
-      data.write(RwLock::new(ProcessData {
-        pflags: flags,
-        task: None,
-        name: None,
-        spawn_parent: parent_pid,
-        group_leader: leader_pid,
-        signal_queue: queue,
-      }));
-    }
-
-    unsafe {
-      dict.write(ProcessDict::new());
+      (&raw mut (*slot).mpid).write(target_pid);
+      (&raw mut (*slot).send).write(sig_send);
+      (&raw mut (*slot).root).write(parent_pid);
+      (&raw mut (*slot).data).write(data);
+      (&raw mut (*slot).dict).write(dict);
     }
   };
 
@@ -287,6 +287,48 @@ where
   let context: ProcessTask = ProcessTask {
     slot: Arc::clone(&slot),
   };
+
+  let local: TaskLocalFuture<ProcessTask, _> = Process::scope(context, async move {
+    let mut queue: ProcessRecv = sig_recv;
+    let safe_task: CatchUnwind<AssertUnwindSafe<F>> = CatchUnwind::new(AssertUnwindSafe(future));
+
+    tokio::pin!(safe_task);
+
+    let reason: ExitReason = 'run: loop {
+      tokio::select! {
+        biased;
+        Some(signal) = queue.recv() => {
+          match signal {
+            Signal::Message(from, term) => {
+              tracing::info!(%from, %term, "Signal::Message");
+
+              Process::with(|this| {
+                this.data.write().inbox_buffer.push(DynMessage::Term(term));
+              });
+            }
+          }
+        }
+        result = &mut safe_task => match result {
+          Ok(()) => break 'run ExitReason::Normal,
+          Err(term) => break 'run ExitReason::Term(Term::new_error(term)),
+        }
+      }
+    };
+
+    Process::with(|this| {
+      let mut guard: RwLockWriteGuard<'_, ProcessData> = this.data.write();
+
+      debug_assert!(guard.exit.is_none());
+
+      guard.exit = Some(reason);
+
+      drop(guard);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 4. Link State <-> Task
+  // ---------------------------------------------------------------------------
 
   if let Some(parent) = parent_pid {
     tracing::event!(
@@ -304,18 +346,6 @@ where
       "Process spawn",
     );
   }
-
-  let local: TaskLocalFuture<ProcessTask, _> = Process::scope(context, async move {
-    if let Err(error) = CatchUnwind::new(AssertUnwindSafe(future)).await {
-      println!("TODO: Handle Exit Err");
-    } else {
-      println!("TODO: Handle Exit Ok");
-    }
-  });
-
-  // ---------------------------------------------------------------------------
-  // 4. Link State <-> Task
-  // ---------------------------------------------------------------------------
 
   slot.data.write().task = Some(task::spawn(local));
 
@@ -340,7 +370,7 @@ fn process_send_internal_proc(from: &ProcessTask, ipid: InternalPid, term: Term)
     return; // Never fail when sending to a non-existent PID.
   };
 
-  if let Err(_error) = dest.root.send.send(Signal::Message(from.root.mpid, term)) {
+  if let Err(_error) = dest.send.send(Signal::Message(from.mpid, term)) {
     raise!(Error, SysInv, "sending on a closed channel");
   }
 }
@@ -367,7 +397,7 @@ pub(crate) fn process_receive<T>(
 where
   T: 'static,
 {
-  let pid: InternalPid = process.root.mpid;
+  let pid: InternalPid = process.mpid;
 
   async move {
     let poll_message: DynMessage = process_poll(pid, DynMessage::is::<T>).await;
@@ -385,7 +415,7 @@ pub(crate) fn process_receive_exact<T>(
 where
   T: 'static,
 {
-  let pid: InternalPid = process.root.mpid;
+  let pid: InternalPid = process.mpid;
 
   async move {
     let poll_message: DynMessage = process_poll(pid, DynMessage::is_exact::<T>).await;
@@ -401,33 +431,46 @@ pub(crate) async fn process_poll<F>(pid: InternalPid, filter: F) -> DynMessage
 where
   F: Fn(&DynMessage) -> bool,
 {
-  let internal: Option<DynMessage> = Process::with(|this| {
-    debug_assert!(this.root.mpid == pid);
-    this.data.write().signal_queue.poll_internal(&filter)
+  let value: Option<DynMessage> = Process::with(|this| {
+    debug_assert!(this.mpid == pid);
+    process_poll_inbox(this, &filter)
   });
 
-  if let Some(message) = internal {
+  if let Some(message) = value {
     return message;
   }
 
-  'external: loop {
-    let external: Option<DynMessage> = Process::with(|this| {
-      debug_assert!(this.root.mpid == pid);
+  'poll: loop {
+    task::yield_now().await;
 
-      let mut guard: RwLockWriteGuard<'_, ProcessData> = this.data.write();
-
-      match guard.signal_queue.poll_external(&filter) {
-        Ok(message) => message,
-        Err(Disconnected) => raise!(Error, SysInv, "receiving on a closed channel"),
-      }
+    let value: Option<DynMessage> = Process::with(|this| {
+      debug_assert!(this.mpid == pid);
+      process_poll_inbox(this, &filter)
     });
 
-    if let Some(message) = external {
-      break 'external message;
+    if let Some(message) = value {
+      break 'poll message;
     }
-
-    task::yield_now().await;
   }
+}
+
+fn process_poll_inbox<F>(process: &ProcessTask, filter: F) -> Option<DynMessage>
+where
+  F: Fn(&DynMessage) -> bool,
+{
+  let guard: RwLockUpgradableReadGuard<'_, ProcessData> = process.data.upgradable_read();
+  let index: Option<usize> = guard.inbox_buffer.iter().position(filter);
+
+  let Some(index) = index else {
+    return None;
+  };
+
+  let mut guard: RwLockWriteGuard<'_, ProcessData> = RwLockUpgradableReadGuard::upgrade(guard);
+  let dyn_value: DynMessage = guard.inbox_buffer.remove(index);
+
+  drop(guard);
+
+  Some(dyn_value)
 }
 
 // -----------------------------------------------------------------------------
@@ -469,7 +512,7 @@ pub(crate) fn process_register(process: &ProcessTask, pid: InternalPid, name: At
   let hold: Arc<ProcessSlot>;
   let this: &ProcessSlot;
 
-  if process.root.mpid == pid {
+  if process.mpid == pid {
     this = process;
   } else {
     let Some(context) = REGISTERED_PROCS.get(pid.bits()) else {
@@ -528,7 +571,7 @@ pub(crate) fn process_unregister(process: &ProcessTask, name: Atom) {
   let hold: Arc<ProcessSlot>;
   let this: &ProcessSlot;
 
-  if process.root.mpid == *name_entry.get() {
+  if process.mpid == *name_entry.get() {
     this = process;
   } else {
     let Some(context) = REGISTERED_PROCS.get(name_entry.get().bits()) else {

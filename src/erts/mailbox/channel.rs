@@ -52,6 +52,11 @@ pub(crate) struct ProcessRecv {
 
 impl ProcessRecv {
   #[inline]
+  pub(crate) async fn recv(&mut self) -> Option<Signal> {
+    self.inner.recv().await
+  }
+
+  #[inline]
   pub(crate) fn try_recv(&mut self) -> Result<Signal, TryRecvError> {
     self.inner.try_recv()
   }

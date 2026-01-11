@@ -26,7 +26,6 @@ mod process_info;
 mod process_table;
 
 pub(crate) use self::process_data::ProcessData;
-pub(crate) use self::process_data::ProcessRoot;
 pub(crate) use self::process_data::ProcessSlot;
 pub(crate) use self::process_data::ProcessTask;
 pub(crate) use self::process_dict::ProcessDict;
@@ -93,7 +92,7 @@ impl Process {
   {
     match CONTEXT.try_with(f) {
       Ok(result) => result,
-      Err(error) => raise!(Error, SysInv, "task-local value not set"),
+      Err(_error) => raise!(Error, SysInv, "task-local value not set"),
     }
   }
 
@@ -105,7 +104,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#self/0>
   pub fn this() -> InternalPid {
-    Self::with(|this| this.root.mpid)
+    Self::with(|this| this.mpid)
   }
 
   /// Returns a list of process identifiers corresponding to all the
@@ -274,7 +273,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/system/expressions.html#receive>
   pub async fn receive_any() -> DynMessage {
-    Self::with(|this| bifs::process_poll(this.root.mpid, |_| true)).await
+    Self::with(|this| bifs::process_poll(this.mpid, |_| true)).await
   }
 
   // ---------------------------------------------------------------------------

@@ -5,14 +5,12 @@ mod process;
 mod runtime;
 mod spawn;
 
-pub(crate) use self::mailbox::Disconnected;
 pub(crate) use self::mailbox::ProcessRecv;
 pub(crate) use self::mailbox::ProcessSend;
 pub(crate) use self::mailbox::Signal;
-pub(crate) use self::mailbox::SignalQueue;
+pub(crate) use self::mailbox::unbounded_channel;
 pub(crate) use self::process::ProcessData;
 pub(crate) use self::process::ProcessDict;
-pub(crate) use self::process::ProcessRoot;
 pub(crate) use self::process::ProcessSlot;
 pub(crate) use self::process::ProcessTask;
 
