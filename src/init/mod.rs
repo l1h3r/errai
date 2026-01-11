@@ -12,6 +12,9 @@ use tokio::runtime::Runtime as TokioRuntime;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::oneshot::Sender;
+use tracing::field;
+use tracing::subscriber;
+use tracing_subscriber::FmtSubscriber;
 
 use crate::bifs;
 use crate::erts::DynMessage;
@@ -37,24 +40,52 @@ pub fn block_on<F>(future: F) -> !
 where
   F: Future<Output = ()> + Send + 'static,
 {
+  // ---------------------------------------------------------------------------
+  // 1. Configure Tracing
+  // ---------------------------------------------------------------------------
+
+  if let Err(error) = subscriber::set_global_default(build_tracing()) {
+    eprintln!("Failed to initialize runtime: {error}");
+    process::exit(Runtime::E_CODE_FAILURE_INIT);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2. Configure Panic Hook
+  // ---------------------------------------------------------------------------
+
   let hook: PanicHook = panic::take_hook();
 
   panic::set_hook(Box::new(move |info| {
-    eprintln!("[errai]: Unhandled panic: {info:?}");
+    tracing::event!(
+      target: "errai",
+      tracing::Level::ERROR,
+      location = info.location().map(field::display),
+      payload = field::display(Term::new_error_ref(info.payload())),
+      "Uncaught exception"
+    );
+
     hook(info);
   }));
+
+  // ---------------------------------------------------------------------------
+  // 3. Configure Tokio Runtime
+  // ---------------------------------------------------------------------------
 
   let runtime: TokioRuntime = match build_runtime() {
     Ok(runtime) => runtime,
     Err(error) => {
-      eprintln!("[errai]: Failed to build runtime: {error}");
+      tracing::error!(%error, "Failed to initialize runtime");
       process::exit(Runtime::E_CODE_FAILURE_INIT);
     }
   };
 
+  // ---------------------------------------------------------------------------
+  // 3. Define Root Task
+  // ---------------------------------------------------------------------------
+
   let task = async move {
     // Set up a channel and wait for the main process to tell use when to exit
-    let (shutdown, mailbox): (Sender<()>, Receiver<()>) = oneshot::channel();
+    let (exit_send, exit_recv): (Sender<()>, Receiver<()>) = oneshot::channel();
 
     // Spawn the root process...
     let _root: InternalPid = bifs::process_spawn_root(async move {
@@ -71,34 +102,60 @@ where
       let _application: InternalPid = Process::spawn_link(future);
 
       // Block and wait for an exit signal
-      match Process::receive_any().await {
-        DynMessage::Term(term) => {
-          // Ignore messages here, we poll and drop terms to keep the queue small.
-        }
-        DynMessage::Exit(exit) => {
-          let sender: &DynPid = exit.sender();
-          let reason: &ExitReason = exit.reason();
+      'run: loop {
+        match Process::receive_any().await {
+          DynMessage::Term(_term) => {
+            // Ignore messages here, we poll and drop terms to keep the queue small.
+          }
+          DynMessage::Exit(exit) => {
+            let sender: &DynPid = exit.sender();
+            let reason: &ExitReason = exit.reason();
 
-          println!("[errai]: Shutdown initialized: {sender} because {reason}");
+            tracing::info!(%sender, %reason, "Runtime shutdown initialized");
 
-          // Tell the parent to begin the shutdown process
-          if let Err(()) = shutdown.send(()) {
-            eprintln!("[errai]: Failed to send application shutdown");
+            break 'run;
           }
         }
       }
+
+      if let Err(()) = exit_send.send(()) {
+        tracing::error!("Failed to shut down runtime: channel closed");
+        process::exit(Runtime::E_CODE_FAILURE_EXEC);
+      }
     });
 
-    // Wait for the shutdown message
-    mailbox.await
+    exit_recv.await
   };
 
+  // ---------------------------------------------------------------------------
+  // 4. Run
+  // ---------------------------------------------------------------------------
+
   if let Err(error) = runtime.block_on(task) {
-    eprintln!("[errai]: Failed to run application: {error}");
+    tracing::error!(%error, "Failed to execute runtime");
     process::exit(Runtime::E_CODE_FAILURE_EXEC);
-  } else {
-    process::exit(Runtime::E_CODE_SUCCESS);
   }
+
+  // ---------------------------------------------------------------------------
+  // 5. Shutdown & Exit
+  // ---------------------------------------------------------------------------
+
+  runtime.shutdown_timeout(Runtime::SHUTDOWN_TIMEOUT);
+
+  process::exit(Runtime::E_CODE_SUCCESS);
+}
+
+fn build_tracing() -> FmtSubscriber {
+  FmtSubscriber::builder()
+    .log_internal_errors(true)
+    .with_ansi(true)
+    .with_file(true)
+    .with_level(true)
+    .with_line_number(true)
+    .with_target(true)
+    .with_thread_ids(true)
+    .with_thread_names(true)
+    .finish()
 }
 
 fn build_runtime() -> Result<TokioRuntime, Error> {

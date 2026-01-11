@@ -79,7 +79,7 @@ pub(crate) fn process_delete(pid: InternalPid) -> Option<Arc<ProcessSlot>> {
 
   if let Some(name) = proc_guard.name.as_ref() {
     if let None = REGISTERED_NAMES.write().remove(name) {
-      eprintln!("[errai]: Dangling Process Name: {name} ({pid})");
+      tracing::warn!(%name, %pid, "Dangling process name");
     }
   }
 
@@ -289,7 +289,20 @@ where
   };
 
   if let Some(parent) = parent_pid {
-    println!("[errai] New Process {target_pid} Spawned by {parent}");
+    tracing::event!(
+      target: "errai",
+      tracing::Level::INFO,
+      target = %target_pid,
+      %parent,
+      "Process spawn",
+    );
+  } else {
+    tracing::event!(
+      target: "errai",
+      tracing::Level::INFO,
+      target = %target_pid,
+      "Process spawn",
+    );
   }
 
   let local: TaskLocalFuture<ProcessTask, _> = Process::scope(context, async move {

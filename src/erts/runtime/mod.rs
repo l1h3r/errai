@@ -53,6 +53,9 @@ impl Runtime {
   /// Stack size (in bytes) for worker threads.
   pub const DEFAULT_THREAD_STACK_SIZE: usize = 2 * 1024 * 1024;
 
+  /// How long to wait for a clean shutdown of the internal runtime.
+  pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
   /// Number of pre-allocated entries in the process dictionary.
   pub(crate) const CAP_PROC_DICTIONARY: usize = 8;
   // Number of pre-allocated process states.

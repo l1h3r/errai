@@ -56,6 +56,19 @@ pub(crate) struct ProcessSlot {
   pub(crate) dict: ProcessDict,
 }
 
+impl Drop for ProcessSlot {
+  fn drop(&mut self) {
+    tracing::event!(
+      target: "errai",
+      tracing::Level::TRACE,
+      ?self.root,
+      ?self.data,
+      ?self.dict,
+      "Process drop",
+    );
+  }
+}
+
 // -----------------------------------------------------------------------------
 // @type - ProcessTask
 // -----------------------------------------------------------------------------
@@ -69,7 +82,7 @@ pub(crate) struct ProcessTask {
 impl Drop for ProcessTask {
   fn drop(&mut self) {
     if bifs::process_delete(self.root.mpid).is_none() {
-      eprintln!("[errai]: Dangling Process ({})", self.root.mpid);
+      tracing::warn!(pid = %self.root.mpid, "Dangling process");
     }
   }
 }
