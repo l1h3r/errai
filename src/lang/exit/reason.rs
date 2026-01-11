@@ -8,8 +8,11 @@ use crate::lang::Term;
 /// The reason used to stop the execution of a running process.
 #[derive(Clone)]
 pub enum ExitReason {
+  /// A graceful process exit.
   Normal,
+  /// A forceful process exit.
   Kill,
+  /// A process exit due to a specific reason.
   Term(Term),
 }
 

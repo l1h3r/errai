@@ -8,7 +8,7 @@ use crate::lang::DynPid;
 use crate::lang::ExternalPid;
 use crate::lang::InternalPid;
 
-/// An internal/external message destination.
+/// Represents an internal or external message destination.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExternalDest {
   /// An internal process identifier.

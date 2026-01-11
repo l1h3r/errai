@@ -6,7 +6,7 @@ use std::fmt::Result;
 use crate::lang::Atom;
 use crate::lang::InternalPid;
 
-/// An internal message destination.
+/// Represents an internal message destination.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InternalDest {
   /// A process identifier.

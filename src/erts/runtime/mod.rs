@@ -22,11 +22,11 @@ impl Runtime {
   // Types
   // ---------------------------------------------------------------------------
 
-  /// Maximum number of characters in an [`Atom`], currently not enforced.
+  /// Maximum number of characters in an [`Atom`].
   ///
   /// [`Atom`]: crate::lang::Atom
   pub const MAX_ATOM_CHARS: usize = 255;
-  /// Maximum number of [`Atom`]s, currently not enforced.
+  /// Maximum number of [`Atom`]s.
   ///
   /// [`Atom`]: crate::lang::Atom
   pub const MAX_ATOM_COUNT: usize = 1 << 20;
