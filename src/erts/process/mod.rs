@@ -1,5 +1,6 @@
 use bitflags::bitflags;
 use std::time::Duration;
+use tokio::task;
 use tokio::task::futures::TaskLocalFuture;
 use tokio::time;
 
@@ -124,6 +125,13 @@ impl Process {
   /// REF: **N/A**
   pub async fn sleep(timeout: Duration) {
     time::sleep(timeout).await
+  }
+
+  /// Yields execution back to the runtime.
+  ///
+  /// REF: **N/A**
+  pub async fn yield_now() {
+    task::yield_now().await;
   }
 
   /// Sends an exit signal with the given `reason` to `pid`.
