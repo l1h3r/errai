@@ -12,6 +12,7 @@ use tokio::runtime::Runtime as TokioRuntime;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::oneshot::Sender;
+use tracing::Level;
 use tracing::field;
 use tracing::subscriber;
 use tracing_subscriber::FmtSubscriber;
@@ -56,9 +57,7 @@ where
   let hook: PanicHook = panic::take_hook();
 
   panic::set_hook(Box::new(move |info| {
-    tracing::event!(
-      target: "errai",
-      tracing::Level::ERROR,
+    tracing::error!(
       location = info.location().map(field::display),
       payload = field::display(Term::new_error_ref(info.payload())),
       "Uncaught exception"
@@ -149,9 +148,9 @@ fn build_tracing() -> FmtSubscriber {
   FmtSubscriber::builder()
     .log_internal_errors(true)
     .with_ansi(true)
-    .with_file(true)
     .with_level(true)
     .with_line_number(true)
+    .with_max_level(Level::TRACE)
     .with_target(true)
     .with_thread_ids(true)
     .with_thread_names(true)
