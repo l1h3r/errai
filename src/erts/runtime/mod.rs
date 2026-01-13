@@ -78,14 +78,14 @@ impl Runtime {
   /// Forcefully stops the Errai runtime system.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#halt/2>
-  pub fn halt(status: u8) {
+  pub fn halt(_status: u8) {
     todo!()
   }
 
   /// Gracefully stops the Errai runtime system.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/init.html#stop/1>
-  pub fn stop(status: u8) {
+  pub fn stop(_status: u8) {
     todo!()
   }
 

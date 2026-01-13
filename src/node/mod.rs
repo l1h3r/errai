@@ -127,7 +127,7 @@ impl Node {
   /// Returns a list of nodes according to the `state` specified.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#nodes/1>
-  pub fn list(state: NodeState) {
+  pub fn list(_state: NodeState) {
     todo!("list/1")
   }
 
@@ -144,7 +144,7 @@ impl Node {
   ///
   /// Raises [`NodeStartError`] if the node is already running or if any
   /// dependencies fail to start.
-  pub fn start(name: Atom, opts: NodeStartOptions) -> InternalPid {
+  pub fn start(_name: Atom, _opts: NodeStartOptions) -> InternalPid {
     todo!("start/2")
   }
 
@@ -177,21 +177,21 @@ impl Node {
   /// Establishes a connection to `node`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/kernel/net_kernel.html#connect_node/1>
-  pub fn connect(node: Atom) -> NodeReply {
+  pub fn connect(_node: Atom) -> NodeReply {
     todo!("connect/1")
   }
 
   /// Forces the disconnection of a node.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#disconnect_node/1>
-  pub fn disconnect(node: Atom) -> NodeReply {
+  pub fn disconnect(_node: Atom) -> NodeReply {
     todo!("disconnect/1")
   }
 
   /// Tries to set up a connection to `node`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/kernel/net_adm.html#ping/1>
-  pub fn ping(node: Atom) -> NodePing {
+  pub fn ping(_node: Atom) -> NodePing {
     todo!("ping/1")
   }
 
@@ -205,7 +205,7 @@ impl Node {
   /// # Errors
   ///
   /// Raises [`NodeNotAlive`] if the local node is not alive.
-  pub fn monitor(node: Atom) {
+  pub fn monitor(_node: Atom) {
     todo!("monitor/1")
   }
 
@@ -216,7 +216,7 @@ impl Node {
   /// # Errors
   ///
   /// Raises [`NodeNotAlive`] if the local node is not alive.
-  pub fn demonitor(node: Atom) {
+  pub fn demonitor(_node: Atom) {
     todo!("demonitor/1")
   }
 
@@ -234,7 +234,7 @@ impl Node {
   /// # Errors
   ///
   /// Raises [`NodeNotAlive`] if the local node is not alive.
-  pub fn set_cookie(cookie: Atom) {
+  pub fn set_cookie(_cookie: Atom) {
     todo!("set_cookie/1")
   }
 
@@ -243,7 +243,7 @@ impl Node {
   /// Returns the external PID, or `None` if `node` does not exist.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#spawn/2>
-  pub async fn spawn<T>(node: Atom, future: T) -> Option<ExternalPid>
+  pub async fn spawn<T>(_node: Atom, _future: T) -> Option<ExternalPid>
   where
     T: Future<Output = ()> + Send + 'static,
   {
@@ -255,7 +255,7 @@ impl Node {
   /// Returns the external PID, or `None` if `node` does not exist.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#spawn_link/2>
-  pub async fn spawn_link<T>(node: Atom, future: T) -> Option<ExternalPid>
+  pub async fn spawn_link<T>(_node: Atom, _future: T) -> Option<ExternalPid>
   where
     T: Future<Output = ()> + Send + 'static,
   {
@@ -267,7 +267,7 @@ impl Node {
   /// Returns the external PID and monitor reference, or `None` if `node` does not exist.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#spawn_monitor/2>
-  pub async fn spawn_monitor<T>(node: Atom, future: T) -> Option<(ExternalPid, ExternalRef)>
+  pub async fn spawn_monitor<T>(_node: Atom, _future: T) -> Option<(ExternalPid, ExternalRef)>
   where
     T: Future<Output = ()> + Send + 'static,
   {
