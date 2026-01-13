@@ -213,7 +213,7 @@ where
   where
     T: Sized,
   {
-    assert!(
+    debug_assert!(
       Self::is_valid(),
       "TaggedPtr::new_unchecked requires that the pointer is properly aligned"
     );
