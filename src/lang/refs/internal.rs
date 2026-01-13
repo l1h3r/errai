@@ -11,24 +11,24 @@ use std::time::Duration;
 use crate::erts::Runtime;
 
 static GLOBAL_REF: CachePadded<LazyLock<AtomicU64>> = CachePadded::new(LazyLock::new(|| {
-  AtomicU64::new(RawRef::initialize(Runtime::time()))
+  AtomicU64::new(InternalRef::initialize(Runtime::time()))
 }));
 
-/// The raw bits of a reference.
+/// An internal reference.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(C)]
-pub struct RawRef {
+#[repr(transparent)]
+pub struct InternalRef {
   bits: [u32; 3],
 }
 
-impl RawRef {
+impl InternalRef {
   pub(crate) const NUMBER_BITS: u32 = 18;
   pub(crate) const SERIAL_BITS: u32 = u32::BITS - Self::NUMBER_BITS;
 
   pub(crate) const NUMBER_MASK: u32 = (1 << Self::NUMBER_BITS) - 1;
   pub(crate) const SERIAL_MASK: u32 = ((1 << Self::SERIAL_BITS) - 1) << Self::NUMBER_BITS;
 
-  /// Creates a new `RawRef`.
+  /// Creates a new `InternalRef`.
   ///
   /// Note: References are currently implemented using a 64-bit global counter.
   ///
@@ -43,7 +43,7 @@ impl RawRef {
     }
   }
 
-  /// Creates a new `RawPid` from the given `bits`.
+  /// Creates a new `InternalRef` from the given `bits`.
   #[inline]
   pub(crate) const fn from_bits(bits: [u32; 3]) -> Self {
     Self { bits }
@@ -77,13 +77,13 @@ impl RawRef {
   }
 }
 
-impl Debug for RawRef {
+impl Debug for InternalRef {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
     Display::fmt(self, f)
   }
 }
 
-impl Display for RawRef {
+impl Display for InternalRef {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
     write!(
       f,

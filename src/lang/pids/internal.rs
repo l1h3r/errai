@@ -4,15 +4,17 @@ use std::fmt::Formatter;
 use std::fmt::Result;
 
 use crate::bifs::translate_pid;
+use crate::lang::ExternalPid;
+use crate::lang::ProcessId;
 
-/// The raw bits of a process identifier.
+/// An internal process identifier.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
-pub struct RawPid {
+pub struct InternalPid {
   bits: u64,
 }
 
-impl RawPid {
+impl InternalPid {
   pub(crate) const TAG_BITS: u32 = 4;
   pub(crate) const PID_BITS: u32 = u32::BITS - Self::TAG_BITS;
 
@@ -22,7 +24,7 @@ impl RawPid {
   pub(crate) const NUMBER_BITS: u32 = 28;
   pub(crate) const SERIAL_BITS: u32 = Self::PID_BITS - Self::NUMBER_BITS;
 
-  /// Creates a new `RawPid` from the given `bits`.
+  /// Creates a new `InternalPid` from the given `bits`.
   #[inline]
   pub(crate) const fn from_bits(bits: u64) -> Self {
     Self { bits }
@@ -35,13 +37,13 @@ impl RawPid {
   }
 }
 
-impl Debug for RawPid {
+impl Debug for InternalPid {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
     Display::fmt(self, f)
   }
 }
 
-impl Display for RawPid {
+impl Display for InternalPid {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
     // For internal PIDs, we use `0` as the channel number.
     // For external PIDs (formatted elsewhere), we use the node name index.
@@ -53,5 +55,19 @@ impl Display for RawPid {
     } else {
       write!(f, "#PID<0.x.x>")
     }
+  }
+}
+
+impl ProcessId for InternalPid {
+  const DISTRIBUTED: bool = false;
+
+  #[inline]
+  fn into_internal(self) -> InternalPid {
+    self
+  }
+
+  #[inline]
+  fn into_external(self) -> Option<ExternalPid> {
+    None
   }
 }

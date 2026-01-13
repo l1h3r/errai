@@ -4,7 +4,6 @@ use std::fmt::Formatter;
 use std::fmt::Result;
 
 use crate::lang::Atom;
-use crate::lang::DynPid;
 use crate::lang::ExternalPid;
 use crate::lang::InternalPid;
 
@@ -92,16 +91,6 @@ impl From<ExternalPid> for ExternalDest {
   #[inline]
   fn from(other: ExternalPid) -> Self {
     Self::ExternalProc(other)
-  }
-}
-
-impl From<DynPid> for ExternalDest {
-  #[inline]
-  fn from(other: DynPid) -> Self {
-    match other {
-      DynPid::Internal(inner) => inner.into(),
-      DynPid::External(inner) => inner.into(),
-    }
   }
 }
 

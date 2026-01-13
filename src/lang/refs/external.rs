@@ -4,27 +4,27 @@ use std::fmt::Formatter;
 use std::fmt::Result;
 
 use crate::lang::Atom;
-use crate::lang::RawRef;
+use crate::lang::InternalRef;
 
 /// An external reference.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]
 pub struct ExternalRef {
-  bits: RawRef,
+  iref: InternalRef,
   node: Atom,
 }
 
 impl ExternalRef {
   /// Creates a new `ExternalRef`.
   #[inline]
-  pub const fn new(bits: RawRef, node: Atom) -> Self {
-    Self { bits, node }
+  pub const fn new(iref: InternalRef, node: Atom) -> Self {
+    Self { iref, node }
   }
 
-  /// Returns the raw reference bits.
+  /// Returns the raw reference iref.
   #[inline]
-  pub const fn bits(&self) -> RawRef {
-    self.bits
+  pub const fn iref(&self) -> InternalRef {
+    self.iref
   }
 
   /// Returns the name of the node that spawned this reference.
@@ -46,9 +46,9 @@ impl Display for ExternalRef {
   }
 }
 
-impl From<(RawRef, Atom)> for ExternalRef {
+impl From<(InternalRef, Atom)> for ExternalRef {
   #[inline]
-  fn from(other: (RawRef, Atom)) -> Self {
+  fn from(other: (InternalRef, Atom)) -> Self {
     Self::new(other.0, other.1)
   }
 }

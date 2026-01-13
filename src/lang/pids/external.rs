@@ -3,29 +3,28 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
-use crate::erts::ProcessId;
 use crate::lang::Atom;
-use crate::lang::DynPid;
-use crate::lang::RawPid;
+use crate::lang::InternalPid;
+use crate::lang::ProcessId;
 
 /// An external process identifier.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]
 pub struct ExternalPid {
-  bits: RawPid,
+  bits: InternalPid,
   node: Atom,
 }
 
 impl ExternalPid {
   /// Creates a new `ExternalPid`.
   #[inline]
-  pub const fn new(bits: RawPid, node: Atom) -> Self {
+  pub const fn new(bits: InternalPid, node: Atom) -> Self {
     Self { bits, node }
   }
 
   /// Returns the raw PID bits.
   #[inline]
-  pub const fn bits(&self) -> RawPid {
+  pub const fn bits(&self) -> InternalPid {
     self.bits
   }
 
@@ -48,26 +47,23 @@ impl Display for ExternalPid {
   }
 }
 
-impl From<(RawPid, Atom)> for ExternalPid {
+impl From<(InternalPid, Atom)> for ExternalPid {
   #[inline]
-  fn from(other: (RawPid, Atom)) -> Self {
+  fn from(other: (InternalPid, Atom)) -> Self {
     Self::new(other.0, other.1)
   }
 }
 
 impl ProcessId for ExternalPid {
+  const DISTRIBUTED: bool = true;
+
   #[inline]
-  fn bits(&self) -> RawPid {
-    self.bits()
+  fn into_internal(self) -> InternalPid {
+    self.bits
   }
 
   #[inline]
-  fn node(&self) -> Option<Atom> {
-    Some(self.node)
-  }
-
-  #[inline]
-  fn into_dyn(self) -> DynPid {
-    DynPid::External(self)
+  fn into_external(self) -> Option<ExternalPid> {
+    Some(self)
   }
 }

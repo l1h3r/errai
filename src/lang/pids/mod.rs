@@ -1,9 +1,7 @@
-mod dyn_pid;
-mod ext_pid;
-mod int_pid;
-mod raw_pid;
+mod external;
+mod internal;
+mod traits;
 
-pub use self::dyn_pid::DynPid;
-pub use self::ext_pid::ExternalPid;
-pub use self::int_pid::InternalPid;
-pub use self::raw_pid::RawPid;
+pub use self::external::ExternalPid;
+pub use self::internal::InternalPid;
+pub use self::traits::ProcessId;

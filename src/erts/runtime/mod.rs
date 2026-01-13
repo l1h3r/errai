@@ -1,8 +1,14 @@
+use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use crate::erts::ProcessSlot;
-use crate::erts::ProcessTable;
+use crate::core::raise;
+use crate::lang::Atom;
+
+mod table;
+
+use self::table::AtomTable;
+use self::table::AtomTableError;
 
 /// Errai runtime API.
 pub struct Runtime;
@@ -99,3 +105,44 @@ impl Runtime {
       .unwrap_or(Duration::ZERO)
   }
 }
+
+// -----------------------------------------------------------------------------
+// Atom Table
+// -----------------------------------------------------------------------------
+
+impl Runtime {
+  pub(crate) fn get_atom(slot: u32) -> &'static str {
+    let Some(term) = ATOM_TABLE.get(slot) else {
+      raise!(Error, SysInv, "atom not found");
+    };
+
+    term
+  }
+
+  pub(crate) fn set_atom(term: &str) -> u32 {
+    match ATOM_TABLE.set(term) {
+      Ok(slot) => slot,
+      Err(AtomTableError::AtomTooLarge) => {
+        raise!(Error, SysCap, "atom too large");
+      }
+      Err(AtomTableError::TooManyAtoms) => {
+        raise!(Error, SysCap, "too many atoms");
+      }
+    }
+  }
+}
+
+static ATOM_TABLE: LazyLock<AtomTable> = LazyLock::new(|| {
+  let table: AtomTable = AtomTable::new();
+
+  assert_eq!(table.set("").unwrap(), Atom::EMPTY.into_slot());
+
+  assert_eq!(table.set("kill").unwrap(), Atom::KILL.into_slot());
+  assert_eq!(table.set("killed").unwrap(), Atom::KILLED.into_slot());
+  assert_eq!(table.set("normal").unwrap(), Atom::NORMAL.into_slot());
+
+  assert_eq!(table.set("noproc").unwrap(), Atom::NOPROC.into_slot());
+  assert_eq!(table.set("noconn").unwrap(), Atom::NOCONN.into_slot());
+
+  table
+});
