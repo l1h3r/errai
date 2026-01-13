@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::time::SystemTime;
 
 use crate::erts::ProcessSlot;
 use crate::erts::ProcessTable;
@@ -93,6 +94,8 @@ impl Runtime {
   ///
   /// REF: <https://www.erlang.org/doc/apps/kernel/os.html#system_time/0>
   pub fn time() -> Duration {
-    todo!()
+    SystemTime::now()
+      .duration_since(SystemTime::UNIX_EPOCH)
+      .unwrap_or(Duration::ZERO)
   }
 }
