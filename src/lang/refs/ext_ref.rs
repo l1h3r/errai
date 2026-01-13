@@ -41,7 +41,7 @@ impl Debug for ExternalRef {
 }
 
 impl Display for ExternalRef {
-  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+  fn fmt(&self, _f: &mut Formatter<'_>) -> Result {
     todo!()
   }
 }
