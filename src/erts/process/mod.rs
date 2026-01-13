@@ -60,7 +60,7 @@ tokio::task_local! {
 // -----------------------------------------------------------------------------
 
 bitflags! {
-  #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+  #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
   pub struct ProcessFlags: u32 {
     const TRAP_EXIT  = 1 << 22;
     const ASYNC_DIST = 1 << 26;
