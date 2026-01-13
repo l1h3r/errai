@@ -157,6 +157,20 @@ impl Debug for DynMessage {
   }
 }
 
+impl From<Term> for DynMessage {
+  #[inline]
+  fn from(other: Term) -> Self {
+    Self::Term(other)
+  }
+}
+
+impl From<ExitMessage> for DynMessage {
+  #[inline]
+  fn from(other: ExitMessage) -> Self {
+    Self::Exit(other)
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Exit Message
 // -----------------------------------------------------------------------------
@@ -172,8 +186,14 @@ pub struct ExitMessage {
 impl ExitMessage {
   /// Creates a new `ExitMessage`.
   #[inline]
-  pub(crate) const fn new(sender: DynPid, reason: ExitReason) -> Self {
-    Self { sender, reason }
+  pub(crate) fn new<T>(sender: T, reason: ExitReason) -> Self
+  where
+    T: Into<DynPid>,
+  {
+    Self {
+      sender: sender.into(),
+      reason,
+    }
   }
 
   /// Returns a reference to the exit signal sender.
