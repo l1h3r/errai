@@ -1,0 +1,111 @@
+use hashbrown::HashMap;
+use std::borrow::Borrow;
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::fmt::Result;
+use std::hash::Hash;
+
+use crate::erts::Runtime;
+use crate::lang::Atom;
+use crate::lang::Term;
+
+/// A process dictionary.
+#[repr(transparent)]
+pub(crate) struct ProcDict {
+  inner: Option<HashMap<Atom, Term>>,
+}
+
+impl ProcDict {
+  #[inline]
+  fn alloc_table() -> HashMap<Atom, Term> {
+    HashMap::with_capacity(Runtime::CAP_PROC_DICTIONARY)
+  }
+
+  /// Creates a new `ProcDict`.
+  #[inline]
+  pub(crate) fn new() -> Self {
+    Self { inner: None }
+  }
+
+  /// Returns a cloned copy of the term corresponding to `key`.
+  pub(crate) fn get<Q>(&self, key: &Q) -> Option<Term>
+  where
+    Atom: Borrow<Q>,
+    Q: Hash + Eq + ?Sized,
+  {
+    self.inner.as_ref().and_then(|data| data.get(key).cloned())
+  }
+
+  /// Inserts a key-value pair into the dictionary.
+  ///
+  /// Returns the previous value, or `None`.
+  pub(crate) fn insert(&mut self, atom: Atom, term: Term) -> Option<Term> {
+    self
+      .inner
+      .get_or_insert_with(Self::alloc_table)
+      .insert(atom, term)
+  }
+
+  /// Removes `key` from the dictionary and returns the value if it was set,
+  /// otherwise returns `None`.
+  pub(crate) fn remove<Q>(&mut self, key: &Q) -> Option<Term>
+  where
+    Atom: Borrow<Q>,
+    Q: Hash + Eq + ?Sized,
+  {
+    self.inner.as_mut().and_then(|data| data.remove(key))
+  }
+
+  /// Clears the dictionary, removing all key-value pairs.
+  #[inline]
+  pub(crate) fn clear(&mut self) -> Vec<(Atom, Term)> {
+    self
+      .inner
+      .as_mut()
+      .map(|data| Vec::from_iter(data.drain()))
+      .unwrap_or_default()
+  }
+
+  /// Returns a list of all key-value pairs in the dictionary.
+  pub(crate) fn pairs(&self) -> Vec<(Atom, Term)> {
+    #[inline]
+    fn clone((atom, term): (&Atom, &Term)) -> (Atom, Term) {
+      (*atom, term.clone())
+    }
+
+    self
+      .inner
+      .as_ref()
+      .map(|data| Vec::from_iter(data.iter().map(clone)))
+      .unwrap_or_default()
+  }
+
+  /// Returns a list of all keys in the dictionary.
+  pub(crate) fn keys(&self) -> Vec<Atom> {
+    self
+      .inner
+      .as_ref()
+      .map(|data| Vec::from_iter(data.keys().copied()))
+      .unwrap_or_default()
+  }
+
+  /// Returns a list of all values in the dictionary.
+  pub(crate) fn values(&self) -> Vec<Term> {
+    self
+      .inner
+      .as_ref()
+      .map(|data| Vec::from_iter(data.values().cloned()))
+      .unwrap_or_default()
+  }
+}
+
+impl Debug for ProcDict {
+  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    if let Some(data) = self.inner.as_ref() {
+      f.write_str("ProcDict ")?;
+      f.debug_map().entries(data.iter()).finish()
+    } else {
+      f.write_str("ProcDict {}")
+    }
+  }
+}

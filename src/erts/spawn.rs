@@ -1,4 +1,10 @@
 use crate::erts::Runtime;
+use crate::lang::InternalPid;
+use crate::lang::InternalRef;
+
+// -----------------------------------------------------------------------------
+// Spawn Config
+// -----------------------------------------------------------------------------
 
 /// Options used to configure a spawned process.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -29,8 +35,8 @@ impl SpawnConfig {
   #[inline]
   pub const fn new() -> Self {
     Self {
-      link: Runtime::SPAWN_INIT_LINK,
-      monitor: Runtime::SPAWN_INIT_MONITOR,
+      link: false,
+      monitor: false,
       async_dist: Runtime::SPAWN_INIT_ASYNC_DIST,
       trap_exit: Runtime::SPAWN_INIT_TRAP_EXIT,
     }
@@ -55,5 +61,32 @@ impl Default for SpawnConfig {
   #[inline]
   fn default() -> Self {
     Self::new()
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Spawn Handle
+// -----------------------------------------------------------------------------
+
+/// A handle to a spawned process.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SpawnHandle {
+  /// A normal process.
+  Process(InternalPid),
+  /// A monitored process.
+  Monitor(InternalPid, InternalRef),
+}
+
+impl SpawnHandle {
+  /// Returns `true` if the spawn handle is a normal process.
+  #[inline]
+  pub const fn is_process(&self) -> bool {
+    matches!(self, Self::Process(_))
+  }
+
+  /// Returns `true` if the spawn handle is a monitored process.
+  #[inline]
+  pub const fn is_monitor(&self) -> bool {
+    matches!(self, Self::Monitor(_, _))
   }
 }

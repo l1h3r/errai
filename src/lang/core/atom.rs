@@ -29,6 +29,8 @@ impl Atom {
   pub const NOPROC: Self = Self::from_slot(4);
   pub const NOCONN: Self = Self::from_slot(5);
 
+  pub const UNDEFINED: Self = Self::from_slot(6);
+
   /// Creates a new `Atom` from an atom table index.
   #[inline]
   pub(crate) const fn from_slot(slot: u32) -> Self {

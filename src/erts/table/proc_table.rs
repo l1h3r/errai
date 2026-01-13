@@ -26,7 +26,7 @@ use std::sync::atomic::Ordering::Release;
 use triomphe::Arc;
 use triomphe::UniqueArc;
 
-use crate::lang::RawPid;
+use crate::lang::InternalPid;
 use crate::tyre::ptr::AtomicTaggedPtr;
 use crate::tyre::ptr::TaggedPtr;
 
@@ -34,43 +34,43 @@ use crate::tyre::ptr::TaggedPtr;
 // Table Full Error
 // -----------------------------------------------------------------------------
 
-/// Error returned by [`ProcessTable::insert`].
+/// Error returned by [`ProcTable::insert`].
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct ProcessTableFull;
+pub struct ProcTableFull;
 
-impl Display for ProcessTableFull {
+impl Display for ProcTableFull {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     f.write_str("too many processes")
   }
 }
 
-impl Error for ProcessTableFull {}
+impl Error for ProcTableFull {}
 
 // -----------------------------------------------------------------------------
 // Table Keys Iterator
 // -----------------------------------------------------------------------------
 
-pub struct Keys<'a, T> {
-  table: &'a ProcessTable<T>,
+pub struct ProcTableKeys<'a, T> {
+  table: &'a ProcTable<T>,
   index: usize,
 }
 
-impl<'a, T> Keys<'a, T> {
+impl<'a, T> ProcTableKeys<'a, T> {
   #[inline]
-  const fn new(table: &'a ProcessTable<T>) -> Self {
+  const fn new(table: &'a ProcTable<T>) -> Self {
     Self { table, index: 0 }
   }
 }
 
-impl<T> Debug for Keys<'_, T> {
+impl<T> Debug for ProcTableKeys<'_, T> {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-    f.write_str("Keys(..)")
+    f.write_str("ProcTableKeys(..)")
   }
 }
 
-impl<'a, T> Iterator for Keys<'a, T> {
-  type Item = RawPid;
+impl<'a, T> Iterator for ProcTableKeys<'a, T> {
+  type Item = InternalPid;
 
   #[inline]
   fn next(&mut self) -> Option<Self::Item> {
@@ -194,12 +194,12 @@ impl<'a, T> Iterator for Keys<'a, T> {
 /// - Boxes represent blocks, and numbers represent logical slot indices.
 /// - Sequentially inserted entries fill slots across blocks, wrapping around when full.
 #[repr(C)]
-pub struct ProcessTable<T> {
+pub struct ProcTable<T> {
   volatile: CachePadded<Volatile>,
   readonly: CachePadded<ReadOnly<T>>,
 }
 
-impl<T> ProcessTable<T> {
+impl<T> ProcTable<T> {
   /// Minimum number of entries supported in the table.
   pub const MIN_ENTRIES: usize = 1 << 4;
 
@@ -212,13 +212,13 @@ impl<T> ProcessTable<T> {
   #[cfg(test)]
   pub const DEF_ENTRIES: usize = 1 << 10;
 
-  /// Creates a new, empty `ProcessTable` with the default capacity.
+  /// Creates a new, empty `ProcTable` with the default capacity.
   #[inline]
   pub fn new() -> Self {
     Self::with_capacity(Self::DEF_ENTRIES)
   }
 
-  /// Creates a new, empty `ProcessTable` with at least the specified capacity.
+  /// Creates a new, empty `ProcTable` with at least the specified capacity.
   ///
   /// The table will not reallocate, and will hold at least `capacity` entries.
   pub fn with_capacity(capacity: usize) -> Self {
@@ -256,11 +256,11 @@ impl<T> ProcessTable<T> {
   ///
   /// # Errors
   ///
-  /// Returns [`ProcessTableFull`] if the table has reached its maximum capacity.
+  /// Returns [`ProcTableFull`] if the table has reached its maximum capacity.
   #[inline]
-  pub fn insert<F>(&self, init: F) -> Result<Arc<T>, ProcessTableFull>
+  pub fn insert<F>(&self, init: F) -> Result<Arc<T>, ProcTableFull>
   where
-    F: FnOnce(&mut MaybeUninit<T>, RawPid),
+    F: FnOnce(&mut MaybeUninit<T>, InternalPid),
   {
     self.do_insert(init)
   }
@@ -272,7 +272,7 @@ impl<T> ProcessTable<T> {
   /// `pid` matches an older entry. This behavior is safe but may be surprising
   /// to some users. The method ensures that the entry is either fully removed
   /// or returned if still valid.
-  pub fn remove(&self, pid: RawPid) -> Option<Arc<T>> {
+  pub fn remove(&self, pid: InternalPid) -> Option<Arc<T>> {
     self.do_remove(pid, self.readonly.pid_to_real_index(pid))
   }
 
@@ -283,14 +283,14 @@ impl<T> ProcessTable<T> {
   /// guarantee that the entry will remain valid after the call returns. Users
   /// should not assume the entry remains available.
   #[inline]
-  pub fn exists(&self, pid: RawPid) -> bool {
+  pub fn exists(&self, pid: InternalPid) -> bool {
     self.do_exists(self.readonly.pid_to_real_index(pid))
   }
 
   /// Retrieves the entry associated with the given `pid`, if it exists and is
   /// not marked for removal.
   #[inline]
-  pub fn get(&self, pid: RawPid) -> Option<Arc<T>> {
+  pub fn get(&self, pid: InternalPid) -> Option<Arc<T>> {
     self.do_get(self.readonly.pid_to_real_index(pid))
   }
 
@@ -306,21 +306,21 @@ impl<T> ProcessTable<T> {
 
   /// Returns an iterator over all the keys (PIDs) currently in the table.
   #[inline]
-  pub fn keys(&self) -> Keys<'_, T> {
-    Keys::new(self)
+  pub fn keys(&self) -> ProcTableKeys<'_, T> {
+    ProcTableKeys::new(self)
   }
 
   /// Translates the given `pid` into a 2-tuple containing the `number` and
   /// `serial` components.
   #[inline]
-  pub fn translate_pid(&self, pid: RawPid) -> (u32, u32) {
+  pub fn translate_pid(&self, pid: InternalPid) -> (u32, u32) {
     fn bits(value: u64, start: u32, count: u32) -> u64 {
       (value >> start) & !(!0_u64 << count)
     }
 
     let source: u64 = self.readonly.pid_to_base_index(pid);
-    let number: u32 = bits(source, 0, RawPid::NUMBER_BITS) as u32;
-    let serial: u32 = bits(source, RawPid::NUMBER_BITS, RawPid::SERIAL_BITS) as u32;
+    let number: u32 = bits(source, 0, InternalPid::NUMBER_BITS) as u32;
+    let serial: u32 = bits(source, InternalPid::NUMBER_BITS, InternalPid::SERIAL_BITS) as u32;
 
     (number, serial)
   }
@@ -330,13 +330,13 @@ impl<T> ProcessTable<T> {
 // Process Table - Internals
 // -----------------------------------------------------------------------------
 
-unsafe impl<T: Send> Send for ProcessTable<T> {}
-unsafe impl<T: Send> Sync for ProcessTable<T> {}
+unsafe impl<T: Send> Send for ProcTable<T> {}
+unsafe impl<T: Send> Sync for ProcTable<T> {}
 
-impl<T> RefUnwindSafe for ProcessTable<T> {}
-impl<T> UnwindSafe for ProcessTable<T> {}
+impl<T> RefUnwindSafe for ProcTable<T> {}
+impl<T> UnwindSafe for ProcTable<T> {}
 
-impl<T> Drop for ProcessTable<T> {
+impl<T> Drop for ProcTable<T> {
   fn drop(&mut self) {
     let memory: usize = strict_align(self.capacity().strict_mul(ENTRY_SIZE));
     let layout: Layout = Layout::from_size_align(memory, CACHE_LINE).expect("valid layout");
@@ -352,7 +352,7 @@ impl<T> Drop for ProcessTable<T> {
   }
 }
 
-impl<T> Debug for ProcessTable<T> {
+impl<T> Debug for ProcTable<T> {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     struct Mask(u32);
 
@@ -362,7 +362,7 @@ impl<T> Debug for ProcessTable<T> {
       }
     }
 
-    f.debug_struct("ProcessTable")
+    f.debug_struct("ProcTable")
       .field("volatile.len", &self.volatile.len)
       .field("volatile.aid", &self.volatile.aid)
       .field("volatile.fid", &self.volatile.fid)
@@ -382,10 +382,10 @@ impl<T> Debug for ProcessTable<T> {
 // Process Table - Slot Allocation
 // -----------------------------------------------------------------------------
 
-impl<T> ProcessTable<T> {
-  fn do_insert<F>(&self, init: F) -> Result<Arc<T>, ProcessTableFull>
+impl<T> ProcTable<T> {
+  fn do_insert<F>(&self, init: F) -> Result<Arc<T>, ProcTableFull>
   where
-    F: FnOnce(&mut MaybeUninit<T>, RawPid),
+    F: FnOnce(&mut MaybeUninit<T>, InternalPid),
   {
     // -------------------------------------------------------------------------
     // 1. Reserve Slot
@@ -421,7 +421,7 @@ impl<T> ProcessTable<T> {
         count = next;
       }
 
-      return Err(ProcessTableFull);
+      return Err(ProcTableFull);
     }
 
     // -------------------------------------------------------------------------
@@ -458,7 +458,7 @@ impl<T> ProcessTable<T> {
 
     debug_assert!(
       real_index.get() < self.capacity() as u64,
-      "ProcessTable::do_insert requires that the index is in bounds",
+      "ProcTable::do_insert requires that the index is in bounds",
     );
 
     // -------------------------------------------------------------------------
@@ -482,12 +482,12 @@ impl<T> ProcessTable<T> {
 
     debug_assert!(
       !item.is_null(),
-      "ProcessTable::do_insert requires that the pointer is not NULL",
+      "ProcTable::do_insert requires that the pointer is not NULL",
     );
 
     debug_assert!(
       item.is_aligned(),
-      "ProcessTable::do_get requires that the pointer is aligned",
+      "ProcTable::do_get requires that the pointer is aligned",
     );
 
     // Release ensures that all prior memory operations (like initializing the
@@ -503,10 +503,10 @@ impl<T> ProcessTable<T> {
     Ok(data_shared)
   }
 
-  fn do_remove(&self, pid: RawPid, index: Index<'_, T>) -> Option<Arc<T>> {
+  fn do_remove(&self, pid: InternalPid, index: Index<'_, T>) -> Option<Arc<T>> {
     debug_assert!(
       index.get() < self.capacity() as u64,
-      "ProcessTable::do_remove requires that the index is in bounds",
+      "ProcTable::do_remove requires that the index is in bounds",
     );
 
     // -------------------------------------------------------------------------
@@ -559,7 +559,7 @@ impl<T> ProcessTable<T> {
 
       debug_assert!(
         slot.load(Acquire).tag() == PTR_TAG_USED,
-        "ProcessTable::do_remove requires that the entry is locked",
+        "ProcTable::do_remove requires that the entry is locked",
       );
 
       // -----------------------------------------------------------------------
@@ -570,12 +570,12 @@ impl<T> ProcessTable<T> {
 
       debug_assert!(
         data != RESERVED,
-        "ProcessTable::do_remove requires that the slot data is valid",
+        "ProcTable::do_remove requires that the slot data is valid",
       );
 
       debug_assert!(
         index == self.readonly.base_index_to_real_index(data),
-        "ProcessTable::do_remove requires that the slot mapping is reversible",
+        "ProcTable::do_remove requires that the slot mapping is reversible",
       );
 
       'release: loop {
@@ -598,7 +598,7 @@ impl<T> ProcessTable<T> {
 
       debug_assert!(
         self.len() > 0,
-        "ProcessTable::do_remove requires that length is > 0",
+        "ProcTable::do_remove requires that length is > 0",
       );
 
       // Release ensures that all memory operations before this operation are
@@ -612,12 +612,12 @@ impl<T> ProcessTable<T> {
 
       debug_assert!(
         !item.is_null(),
-        "ProcessTable::do_remove requires that the pointer is not NULL",
+        "ProcTable::do_remove requires that the pointer is not NULL",
       );
 
       debug_assert!(
         item.is_aligned(),
-        "ProcessTable::do_remove requires that the pointer is aligned",
+        "ProcTable::do_remove requires that the pointer is aligned",
       );
 
       // SAFETY: `ptr` is derived from a valid `Arc<T>` and assumed to be properly initialized.
@@ -644,7 +644,7 @@ impl<T> ProcessTable<T> {
   fn do_exists(&self, index: Index<'_, T>) -> bool {
     debug_assert!(
       index.get() < self.capacity() as u64,
-      "ProcessTable::do_exists requires that the index is in bounds",
+      "ProcTable::do_exists requires that the index is in bounds",
     );
 
     // -------------------------------------------------------------------------
@@ -675,7 +675,7 @@ impl<T> ProcessTable<T> {
   fn do_get(&self, index: Index<'_, T>) -> Option<Arc<T>> {
     debug_assert!(
       index.get() < self.capacity() as u64,
-      "ProcessTable::do_get requires that the index is in bounds",
+      "ProcTable::do_get requires that the index is in bounds",
     );
 
     // -------------------------------------------------------------------------
@@ -728,7 +728,7 @@ impl<T> ProcessTable<T> {
 
       debug_assert!(
         slot.load(Acquire).tag() == PTR_TAG_USED,
-        "ProcessTable::do_get requires that the entry is locked",
+        "ProcTable::do_get requires that the entry is locked",
       );
 
       // -----------------------------------------------------------------------
@@ -737,12 +737,12 @@ impl<T> ProcessTable<T> {
 
       debug_assert!(
         !item.is_null(),
-        "ProcessTable::do_get requires that the pointer is not NULL",
+        "ProcTable::do_get requires that the pointer is not NULL",
       );
 
       debug_assert!(
         item.is_aligned(),
-        "ProcessTable::do_get requires that the pointer is aligned",
+        "ProcTable::do_get requires that the pointer is aligned",
       );
 
       // SAFETY: `ptr` is derived from a valid `Arc<T>` and assumed to be properly initialized.
@@ -751,7 +751,7 @@ impl<T> ProcessTable<T> {
 
       debug_assert!(
         Arc::count(&data_shared) > 1,
-        "ProcessTable::do_get requires that the refcount is > 1",
+        "ProcTable::do_get requires that the refcount is > 1",
       );
 
       // Use `ManuallyDrop` to avoid dropping the `Arc<T>` prematurely.
@@ -773,16 +773,16 @@ impl<T> ProcessTable<T> {
     }
   }
 
-  fn refresh_data(&self, pid: RawPid) -> u64 {
+  fn refresh_data(&self, pid: InternalPid) -> u64 {
     let mut data: u64 = self.readonly.pid_to_base_index(pid);
 
     data += self.capacity() as u64;
-    data &= !(!0_u64 << RawPid::PID_BITS);
+    data &= !(!0_u64 << InternalPid::PID_BITS);
 
     // Ensure we never stored invalid data.
     if data == RESERVED {
       data += self.capacity() as u64;
-      data &= !(!0_u64 << RawPid::PID_BITS);
+      data &= !(!0_u64 << InternalPid::PID_BITS);
     }
 
     data
@@ -793,7 +793,7 @@ impl<T> ProcessTable<T> {
 // Process Table - Memory Allocation
 // -----------------------------------------------------------------------------
 
-impl<T> ProcessTable<T> {
+impl<T> ProcTable<T> {
   #[inline]
   const fn actual_capacity(capacity: usize) -> usize {
     if capacity < Self::MIN_ENTRIES {
@@ -1263,25 +1263,25 @@ impl<T> ReadOnly<T> {
   }
 
   #[inline]
-  const fn base_index_to_pid(&self, input: u64) -> RawPid {
-    let value: u64 = input & ((1_u64 << RawPid::PID_BITS) - 1);
+  const fn base_index_to_pid(&self, input: u64) -> InternalPid {
+    let value: u64 = input & ((1_u64 << InternalPid::PID_BITS) - 1);
     let value: u64 = self.base_index_to_pid_data(value);
-    let value: u64 = (value << RawPid::TAG_BITS) | RawPid::TAG_DATA;
+    let value: u64 = (value << InternalPid::TAG_BITS) | InternalPid::TAG_DATA;
 
-    RawPid::from_bits(value)
+    InternalPid::from_bits(value)
   }
 
   #[inline]
-  const fn pid_to_real_index(&self, input: RawPid) -> Index<'_, T> {
-    let value: u64 = input.into_bits() >> RawPid::TAG_BITS;
+  const fn pid_to_real_index(&self, input: InternalPid) -> Index<'_, T> {
+    let value: u64 = input.into_bits() >> InternalPid::TAG_BITS;
     let value: Index<'_, T> = self.pid_data_to_real_index(value);
 
     value
   }
 
   #[inline]
-  const fn pid_to_base_index(&self, input: RawPid) -> u64 {
-    let value: u64 = input.into_bits() >> RawPid::TAG_BITS;
+  const fn pid_to_base_index(&self, input: InternalPid) -> u64 {
+    let value: u64 = input.into_bits() >> InternalPid::TAG_BITS;
     let value: u64 = self.pid_data_to_base_index(value);
 
     value
@@ -1296,9 +1296,9 @@ impl<T> ReadOnly<T> {
 mod tests {
   use super::*;
 
-  type Table = ProcessTable<usize>;
+  type Table = ProcTable<usize>;
 
-  fn write(value: usize) -> impl Fn(&mut MaybeUninit<usize>, RawPid) {
+  fn write(value: usize) -> impl Fn(&mut MaybeUninit<usize>, InternalPid) {
     move |ptr, _pid| {
       ptr.write(value);
     }
@@ -1336,7 +1336,7 @@ mod tests {
     for index in 0..table.capacity() * 3 {
       let real: Index<'_, usize> = table.readonly.base_index_to_real_index(index as u64);
       let data: u64 = table.readonly.base_index_to_pid_data(index as u64);
-      let rpid: RawPid = table.readonly.base_index_to_pid(index as u64);
+      let rpid: InternalPid = table.readonly.base_index_to_pid(index as u64);
 
       assert_eq!(table.readonly.pid_data_to_base_index(data), index as u64);
       assert_eq!(table.readonly.pid_data_to_real_index(data), real);
@@ -1382,7 +1382,7 @@ mod tests {
     let _item: Arc<usize> = table.insert(write(1)).unwrap();
     let _item: Arc<usize> = table.insert(write(2)).unwrap();
 
-    let keys: Vec<RawPid> = table.keys().collect();
+    let keys: Vec<InternalPid> = table.keys().collect();
 
     assert_eq!(keys.len(), 2);
   }

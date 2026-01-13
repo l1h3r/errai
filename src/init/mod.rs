@@ -22,7 +22,6 @@ use crate::erts::DynMessage;
 use crate::erts::Process;
 use crate::erts::ProcessFlags;
 use crate::erts::Runtime;
-use crate::lang::DynPid;
 use crate::lang::ExitReason;
 use crate::lang::InternalPid;
 use crate::lang::Term;
@@ -107,7 +106,7 @@ where
             // Ignore messages here, we poll and drop terms to keep the queue small.
           }
           DynMessage::Exit(exit) => {
-            let sender: &DynPid = exit.sender();
+            let sender: &InternalPid = exit.sender();
             let reason: &ExitReason = exit.reason();
 
             tracing::info!(%sender, %reason, "Runtime shutdown initialized");

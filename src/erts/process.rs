@@ -5,14 +5,16 @@ use tokio::task::futures::TaskLocalFuture;
 use tokio::time;
 
 use crate::bifs;
+use crate::core::ProcTask;
+use crate::core::ProcessFlags;
+use crate::core::ProcessInfo;
 use crate::core::raise;
 use crate::erts::DynMessage;
 use crate::erts::Message;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
 use crate::lang::Atom;
-use crate::lang::DynRef;
-use crate::lang::ExitReason;
+use crate::lang::Exit;
 use crate::lang::ExternalDest;
 use crate::lang::InternalDest;
 use crate::lang::InternalPid;

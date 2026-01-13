@@ -65,18 +65,21 @@ impl ExceptionGroup {
 pub struct Exception {
   class: ExceptionClass,
   group: ExceptionGroup,
-  error: &'static str,
+  error: String,
   trace: Backtrace,
 }
 
 impl Exception {
   /// Creates a new `Exception`.
   #[inline]
-  pub(crate) fn new(class: ExceptionClass, group: ExceptionGroup, error: &'static str) -> Self {
+  pub(crate) fn new<T>(class: ExceptionClass, group: ExceptionGroup, error: T) -> Self
+  where
+    T: Display,
+  {
     Self {
       class,
       group,
-      error,
+      error: error.to_string(),
       trace: Backtrace::capture(),
     }
   }
@@ -95,8 +98,8 @@ impl Exception {
 
   /// Returns the exception error message.
   #[inline]
-  pub const fn error(&self) -> &'static str {
-    self.error
+  pub const fn error(&self) -> &str {
+    self.error.as_str()
   }
 
   /// Returns the thread stack backtrace leading up to the exception.

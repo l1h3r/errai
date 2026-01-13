@@ -3,8 +3,8 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
 
-use crate::lang::DynPid;
-use crate::lang::ExitReason;
+use crate::lang::Exit;
+use crate::lang::InternalPid;
 use crate::lang::Term;
 
 // -----------------------------------------------------------------------------
@@ -179,16 +179,16 @@ impl From<ExitMessage> for DynMessage {
 #[derive(Clone, Debug)]
 #[repr(C)]
 pub struct ExitMessage {
-  sender: DynPid,
-  reason: ExitReason,
+  sender: InternalPid,
+  reason: Exit,
 }
 
 impl ExitMessage {
   /// Creates a new `ExitMessage`.
   #[inline]
-  pub(crate) fn new<T>(sender: T, reason: ExitReason) -> Self
+  pub(crate) fn new<T>(sender: T, reason: Exit) -> Self
   where
-    T: Into<DynPid>,
+    T: Into<InternalPid>,
   {
     Self {
       sender: sender.into(),
@@ -198,13 +198,13 @@ impl ExitMessage {
 
   /// Returns a reference to the exit signal sender.
   #[inline]
-  pub const fn sender(&self) -> &DynPid {
+  pub const fn sender(&self) -> &InternalPid {
     &self.sender
   }
 
   /// Returns the exit signal reason.
   #[inline]
-  pub const fn reason(&self) -> &ExitReason {
+  pub const fn reason(&self) -> &Exit {
     &self.reason
   }
 }
