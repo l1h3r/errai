@@ -13,11 +13,11 @@ pub struct RawPid {
 }
 
 impl RawPid {
-  pub(crate) const TAG_DATA: u64 = (0x0 << Self::TAG_BITS) | 0x3;
-  pub(crate) const TAG_MASK: u64 = 0xF;
-
   pub(crate) const TAG_BITS: u32 = 4;
   pub(crate) const PID_BITS: u32 = u32::BITS - Self::TAG_BITS;
+
+  pub(crate) const TAG_DATA: u64 = (0x0 << Self::TAG_BITS) | 0x3;
+  pub(crate) const TAG_MASK: u64 = 0xF;
 
   pub(crate) const NUMBER_BITS: u32 = 28;
   pub(crate) const SERIAL_BITS: u32 = Self::PID_BITS - Self::NUMBER_BITS;
@@ -32,18 +32,6 @@ impl RawPid {
   #[inline]
   pub(crate) const fn into_bits(self) -> u64 {
     self.bits
-  }
-
-  /// Returns the PID number value.
-  #[inline]
-  pub const fn number(self) -> u32 {
-    self.bits as u32
-  }
-
-  /// Returns the PID serial value.
-  #[inline]
-  pub const fn serial(self) -> u32 {
-    (self.bits >> u32::BITS) as u32
   }
 }
 

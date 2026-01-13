@@ -43,14 +43,8 @@ impl Debug for ExternalPid {
 }
 
 impl Display for ExternalPid {
-  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-    write!(
-      f,
-      "#PID<{}.{}.{}>",
-      self.node,
-      self.bits.number(),
-      self.bits.serial()
-    )
+  fn fmt(&self, _f: &mut Formatter<'_>) -> Result {
+    todo!()
   }
 }
 
