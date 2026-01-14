@@ -2,7 +2,6 @@ use std::num::NonZeroU64;
 
 use crate::core::WeakProcSend;
 use crate::erts::DynMessage;
-use crate::lang::Atom;
 use crate::lang::Exit;
 use crate::lang::InternalDest;
 use crate::lang::InternalPid;
@@ -16,6 +15,7 @@ pub(crate) enum Signal {
     linked: bool,
   },
   Send {
+    from: InternalPid,
     data: DynMessage,
   },
   Link {
@@ -43,6 +43,6 @@ pub(crate) enum Signal {
   MonitorDown {
     mref: InternalRef,
     item: InternalDest,
-    info: Atom,
+    info: Exit,
   },
 }

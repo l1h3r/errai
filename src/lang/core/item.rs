@@ -1,7 +1,6 @@
 use dyn_clone::DynClone;
 use std::any::Any;
 use std::fmt::Debug;
-use std::fmt::Display;
 
 /// A dynamically typed value used by the runtime.
 ///
@@ -12,9 +11,9 @@ use std::fmt::Display;
 /// All [`Item`]s:
 /// - Are `'static` and thread-safe
 /// - Support cloning via [`DynClone`]
-/// - Can be formatted using [`Debug`] and [`Display`]
+/// - Can be formatted using [`Debug`]
 /// - Can be dynamically inspected through [`Any`]
-pub trait Item: Any + Debug + Display + DynClone + Send + Sync + 'static {
+pub trait Item: Any + Debug + DynClone + Send + Sync + 'static {
   /// Returns a shared reference to this value as [`Any`].
   ///
   /// This enables runtime type inspection and safe downcasting.
@@ -34,7 +33,7 @@ pub trait Item: Any + Debug + Display + DynClone + Send + Sync + 'static {
 
 impl<T> Item for T
 where
-  T: Any + Debug + Display + DynClone + Send + Sync + 'static,
+  T: Any + Debug + DynClone + Send + Sync + 'static,
 {
   #[inline]
   fn as_any(&self) -> &(dyn Any + Send + Sync) {

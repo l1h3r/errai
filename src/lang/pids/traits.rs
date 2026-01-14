@@ -1,3 +1,6 @@
+use std::fmt::Debug;
+use std::fmt::Display;
+
 use crate::lang::ExternalPid;
 use crate::lang::InternalPid;
 
@@ -8,7 +11,7 @@ mod private {
 impl private::Sealed for ExternalPid {}
 impl private::Sealed for InternalPid {}
 
-pub trait ProcessId: private::Sealed {
+pub trait ProcessId: private::Sealed + Debug + Display {
   const DISTRIBUTED: bool;
 
   /// Converts `self` into an internal PID.

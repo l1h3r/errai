@@ -27,6 +27,12 @@ impl ProcLink {
     self.unlink.is_none()
   }
 
+  /// Returns `true` if the link is disabled.
+  #[inline]
+  pub fn is_disabled(&self) -> bool {
+    !self.is_enabled()
+  }
+
   /// Sets the link state to "enabled".
   #[inline]
   pub(crate) fn enable(&mut self) {

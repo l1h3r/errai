@@ -18,11 +18,10 @@ use tracing::subscriber;
 use tracing_subscriber::FmtSubscriber;
 
 use crate::bifs;
+use crate::core::ProcessFlags;
 use crate::erts::DynMessage;
 use crate::erts::Process;
-use crate::erts::ProcessFlags;
 use crate::erts::Runtime;
-use crate::lang::ExitReason;
 use crate::lang::InternalPid;
 use crate::lang::Term;
 
@@ -55,8 +54,9 @@ where
 
   let hook: PanicHook = panic::take_hook();
 
+  // TODO: Avoid logging twice. Maybe don't add this..
   panic::set_hook(Box::new(move |info| {
-    tracing::error!(
+    tracing::info!(
       location = info.location().map(field::display),
       payload = field::display(Term::new_error_ref(info.payload())),
       "Uncaught exception"
@@ -82,47 +82,11 @@ where
   // ---------------------------------------------------------------------------
 
   let task = async move {
-    // Set up a channel and wait for the main process to tell use when to exit
-    let (exit_send, exit_recv): (Sender<()>, Receiver<()>) = oneshot::channel();
+    let (send, recv): (Sender<()>, Receiver<()>) = oneshot::channel();
 
-    // Spawn the root process...
-    let _root: InternalPid = bifs::process_spawn_root(async move {
-      // We *must* trap exits to ensure we forward shutdown signals to the parent.
-      Process::set_flag(ProcessFlags::TRAP_EXIT, true);
+    spawn_root_process(future, send);
 
-      // Register *this* process because it's important...
-      Process::register(Process::this(), "$__ERTS_ROOT");
-
-      // Spawn the main process to do whatever the caller wanted to do.
-      //
-      // The process is linked to *this* process since we rely on the delivery
-      // of exit signals for a clean shutdown.
-      let _application: InternalPid = Process::spawn_link(future);
-
-      // Block and wait for an exit signal
-      'run: loop {
-        match Process::receive_any().await {
-          DynMessage::Term(_term) => {
-            // Ignore messages here, we poll and drop terms to keep the queue small.
-          }
-          DynMessage::Exit(exit) => {
-            let sender: &InternalPid = exit.sender();
-            let reason: &ExitReason = exit.reason();
-
-            tracing::info!(%sender, %reason, "Runtime shutdown initialized");
-
-            break 'run;
-          }
-        }
-      }
-
-      if let Err(()) = exit_send.send(()) {
-        tracing::error!("Failed to shut down runtime: channel closed");
-        process::exit(Runtime::E_CODE_FAILURE_EXEC);
-      }
-    });
-
-    exit_recv.await
+    recv.await
   };
 
   // ---------------------------------------------------------------------------
@@ -193,4 +157,54 @@ fn next_worker_id() -> u32 {
 
 fn next_worker_name() -> String {
   format!("errai-worker-{}", next_worker_id())
+}
+
+fn spawn_root_process<F>(future: F, shutdown: Sender<()>) -> InternalPid
+where
+  F: Future<Output = ()> + Send + 'static,
+{
+  bifs::process_spawn_root(async move {
+    let this: InternalPid = Process::this();
+
+    tracing::trace!(pid = %this, "Enter Root Process");
+
+    // We *must* trap exits to ensure we forward shutdown signals to the parent.
+    Process::set_flag(ProcessFlags::TRAP_EXIT, true);
+
+    // Register *this* process because it's important...
+    Process::register(this, "$__ERTS_ROOT");
+
+    tracing::trace!(pid = %this, "Spawn Application Process");
+
+    // Spawn the main process to do whatever the caller wanted to do.
+    //
+    // The process is linked to *this* process since we rely on the delivery
+    // of exit signals for a clean shutdown.
+    let application: InternalPid = Process::spawn_link(future);
+
+    tracing::trace!(pid = %this, "Start Runloop");
+
+    // Block and wait for an exit signal
+    'run: loop {
+      match Process::receive_any().await {
+        DynMessage::Term(_term) => {
+          // Ignore messages here, we poll and drop terms to keep the queue small.
+        }
+        DynMessage::Exit(exit) if *exit.sender() == application => {
+          tracing::info!(?exit, "Runtime shutdown initialized");
+          break 'run;
+        }
+        DynMessage::Exit(_exit) => {
+          // We only care about exit messages sent from the app process.
+        }
+      }
+    }
+
+    tracing::trace!(pid = %this, "Exit Runloop");
+
+    if let Err(()) = shutdown.send(()) {
+      tracing::error!("Failed to shut down runtime: channel closed");
+      process::exit(Runtime::E_CODE_FAILURE_EXEC);
+    }
+  })
 }

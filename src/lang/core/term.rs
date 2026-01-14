@@ -138,6 +138,6 @@ impl Debug for Term {
 
 impl Display for Term {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-    Display::fmt(&*self.data, f)
+    Debug::fmt(&*self.data, f)
   }
 }

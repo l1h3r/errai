@@ -2,8 +2,8 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use crate::core::raise;
 use crate::core::ProcData;
+use crate::core::raise;
 use crate::erts::AtomTable;
 use crate::erts::AtomTableError;
 use crate::erts::ProcTable;

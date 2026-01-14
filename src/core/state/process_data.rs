@@ -80,11 +80,7 @@ pub(crate) struct ProcData {
 
 impl Drop for ProcData {
   fn drop(&mut self) {
-    if let Some(root) = self.readonly.root {
-      tracing::trace!(pid = %self.readonly.mpid, parent = %root, "Process drop");
-    } else {
-      tracing::trace!(pid = %self.readonly.mpid, "Process drop");
-    }
+    tracing::trace!(pid = %self.readonly.mpid, "Proc Drop");
   }
 }
 
@@ -184,7 +180,7 @@ pub(crate) struct ProcExternal {
   /// Registered name.
   pub(crate) name: Option<Atom>,
   /// Reason for termination.
-  pub(crate) exit: Option<Exit>,
+  pub(crate) exit: OnceLock<Exit>,
 }
 
 impl ProcExternal {
@@ -193,7 +189,7 @@ impl ProcExternal {
   pub(crate) fn new() -> Self {
     Self {
       name: None,
-      exit: None,
+      exit: OnceLock::new(),
     }
   }
 }

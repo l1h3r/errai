@@ -1,4 +1,3 @@
-use bitflags::bitflags;
 use std::time::Duration;
 use tokio::task;
 use tokio::task::futures::TaskLocalFuture;
@@ -13,6 +12,7 @@ use crate::erts::DynMessage;
 use crate::erts::Message;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
+use crate::lang::AliasRef;
 use crate::lang::Atom;
 use crate::lang::Exit;
 use crate::lang::ExternalDest;
@@ -20,54 +20,17 @@ use crate::lang::InternalDest;
 use crate::lang::InternalPid;
 use crate::lang::InternalRef;
 use crate::lang::Item;
+use crate::lang::MonitorRef;
+use crate::lang::ProcessId;
 use crate::lang::Term;
-
-mod process_data;
-mod process_dict;
-mod process_id;
-mod process_info;
-mod process_table;
-
-pub(crate) use self::process_data::ProcessData;
-pub(crate) use self::process_data::ProcessSlot;
-pub(crate) use self::process_data::ProcessTask;
-pub(crate) use self::process_dict::ProcessDict;
-
-pub use self::process_id::ProcessId;
-pub use self::process_info::ProcessInfo;
-pub use self::process_table::ProcessTable;
-pub use self::process_table::ProcessTableFull;
-
-// -----------------------------------------------------------------------------
-// @alias - References
-// -----------------------------------------------------------------------------
-
-pub type MonitorRef = DynRef;
-
-pub type AliasRef = InternalRef;
-pub type TimerRef = InternalRef;
+use crate::lang::TimerRef;
 
 // -----------------------------------------------------------------------------
 // @data - Task Globals
 // -----------------------------------------------------------------------------
 
 tokio::task_local! {
-  static CONTEXT: ProcessTask;
-}
-
-// -----------------------------------------------------------------------------
-// @type - ProcessFlags
-//
-// Somewhat copied from:
-//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process.h#L1632
-// -----------------------------------------------------------------------------
-
-bitflags! {
-  #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-  pub struct ProcessFlags: u32 {
-    const TRAP_EXIT  = 1 << 22;
-    const ASYNC_DIST = 1 << 26;
-  }
+  static CONTEXT: ProcTask;
 }
 
 // -----------------------------------------------------------------------------
@@ -80,7 +43,7 @@ pub struct Process;
 impl Process {
   /// Sets the task-local process context.
   #[inline]
-  pub(crate) fn scope<F>(task: ProcessTask, future: F) -> TaskLocalFuture<ProcessTask, F>
+  pub(crate) fn scope<F>(task: ProcTask, future: F) -> TaskLocalFuture<ProcTask, F>
   where
     F: Future,
   {
@@ -91,11 +54,11 @@ impl Process {
   #[inline]
   pub(crate) fn with<F, R>(f: F) -> R
   where
-    F: FnOnce(&ProcessTask) -> R,
+    F: FnOnce(&ProcTask) -> R,
   {
     match CONTEXT.try_with(f) {
       Ok(result) => result,
-      Err(_error) => raise!(Error, SysInv, "task-local value not set"),
+      Err(error) => raise!(Error, SysInv, error),
     }
   }
 
@@ -107,7 +70,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#self/0>
   pub fn this() -> InternalPid {
-    Self::with(|this| this.mpid)
+    Self::with(|this| this.readonly.mpid)
   }
 
   /// Returns a list of process identifiers corresponding to all the
@@ -139,13 +102,13 @@ impl Process {
   /// Sends an exit signal with the given `reason` to `pid`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#exit/2>
-  pub fn exit(pid: impl ProcessId, reason: impl Into<ExitReason>) {
-    todo!("exit/2")
+  pub fn exit(pid: impl ProcessId, reason: impl Into<Exit>) {
+    Self::with(|this| bifs::process_exit(this, pid, reason.into()))
   }
 
   /// Returns `true` if the process exists and is alive, that is, is not exiting
   /// and has not exited. Otherwise returns `false`.
-  pub fn alive(pid: InternalPid) -> bool {
+  pub fn alive(_pid: InternalPid) -> bool {
     todo!("alive/1")
   }
 
@@ -153,7 +116,7 @@ impl Process {
   ///
   /// REF: **N/A**
   pub fn get_flags() -> ProcessFlags {
-    Self::with(|this| bifs::process_get_flags(this))
+    Self::with(bifs::process_get_flags)
   }
 
   /// Sets the process flags of the calling process.
@@ -218,7 +181,7 @@ impl Process {
   /// Spawns a new atomically monitored process to handle `future`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#spawn_monitor/1>
-  pub fn spawn_monitor<F>(future: F) -> (InternalPid, MonitorRef)
+  pub fn spawn_monitor<F>(future: F) -> (InternalPid, InternalRef)
   where
     F: Future<Output = ()> + Send + 'static,
   {
@@ -231,14 +194,14 @@ impl Process {
     }
   }
 
-  /// Spawns a new process with the given `options` to handle `future`.
+  /// Spawns a new process with the given `opts` to handle `future`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#spawn_opt/2>
-  pub fn spawn_opt<F>(future: F, options: SpawnConfig) -> SpawnHandle
+  pub fn spawn_opt<F>(future: F, opts: SpawnConfig) -> SpawnHandle
   where
     F: Future<Output = ()> + Send + 'static,
   {
-    Self::with(|this| bifs::process_spawn(this, options, future))
+    Self::with(|this| bifs::process_spawn(this, opts, future))
   }
 
   /// Sends `message` to the given `destination`.
@@ -250,9 +213,9 @@ impl Process {
   /// Raises [`Exception`] if the destination is an unregistered name.
   ///
   /// [`Exception`]: crate::core::Exception
-  pub fn send<M>(dest: impl Into<ExternalDest>, term: M)
+  pub fn send<T>(dest: impl Into<ExternalDest>, term: T)
   where
-    M: Item,
+    T: Item,
   {
     Self::with(|this| bifs::process_send(this, dest.into(), Term::new(term)))
   }
@@ -265,7 +228,7 @@ impl Process {
   where
     T: 'static,
   {
-    Self::with(|this| bifs::process_receive::<T>(this)).await
+    Self::with(|this| bifs::process_receive::<T>(this.readonly.mpid)).await
   }
 
   /// Checks if there is a message matching the given type `T` in the mailbox of
@@ -276,14 +239,14 @@ impl Process {
   where
     T: 'static,
   {
-    Self::with(|this| bifs::process_receive_exact::<T>(this)).await
+    Self::with(|this| bifs::process_receive_exact::<T>(this.readonly.mpid)).await
   }
 
   /// Checks if there is a message in the mailbox of the current process.
   ///
   /// REF: <https://www.erlang.org/doc/system/expressions.html#receive>
   pub async fn receive_any() -> DynMessage {
-    Self::with(|this| bifs::process_poll(this.mpid, |_| true)).await
+    Self::with(|this| bifs::process_receive_any(this.readonly.mpid)).await
   }
 
   // ---------------------------------------------------------------------------
@@ -300,7 +263,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#link/1>
   pub fn link(pid: impl ProcessId) {
-    todo!("link/1")
+    Self::with(|this| bifs::process_link(this, pid))
   }
 
   /// Removes the link between the calling process and the given `pid`.
@@ -310,7 +273,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#unlink/1>
   pub fn unlink(pid: impl ProcessId) {
-    todo!("unlink/1")
+    Self::with(|this| bifs::process_unlink(this, pid))
   }
 
   /// Starts monitoring the given `item` from the calling process.
@@ -333,7 +296,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#monitor/2>
   pub fn monitor(item: impl Into<ExternalDest>) -> MonitorRef {
-    todo!("monitor/1")
+    Self::with(|this| bifs::process_monitor(this, item.into()))
   }
 
   /// Demonitors the monitor identified by the given `reference`.
@@ -344,13 +307,13 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#demonitor/1>
   pub fn demonitor(reference: MonitorRef) {
-    todo!("demonitor/1")
+    Self::with(|this| bifs::process_demonitor(this, reference))
   }
 
   /// Creates a process alias.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#alias/0>
-  pub fn alias(reply: bool) -> AliasRef {
+  pub fn alias(_reply: bool) -> AliasRef {
     todo!("alias/1")
   }
 
@@ -360,7 +323,7 @@ impl Process {
   /// processes, or `false` otherwise.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#unalias/1>
-  pub fn unalias(alias: AliasRef) -> bool {
+  pub fn unalias(_alias: AliasRef) -> bool {
     todo!("unalias/1")
   }
 
@@ -371,7 +334,7 @@ impl Process {
   /// Sends `message` to given `destination` after `time` delay.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#send_after/3>
-  pub fn send_after<T>(destination: impl Into<InternalDest>, message: T, time: Duration) -> TimerRef
+  pub fn send_after<T>(_dest: impl Into<InternalDest>, _term: T, _time: Duration) -> TimerRef
   where
     T: Send + 'static,
   {
@@ -387,7 +350,7 @@ impl Process {
   /// not tell you if the timeout message has arrived at its destination yet.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#cancel_timer/1>
-  pub fn cancel_timer(timer: TimerRef) -> Option<Duration> {
+  pub fn cancel_timer(_timer: TimerRef) -> Option<Duration> {
     todo!("cancel_timer/1")
   }
 
@@ -400,7 +363,7 @@ impl Process {
   /// not tell you if the timeout message has arrived at its destination yet.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#read_timer/1>
-  pub fn read_timer(reference: TimerRef) -> Option<Duration> {
+  pub fn read_timer(_reference: TimerRef) -> Option<Duration> {
     todo!("read_timer/1")
   }
 
@@ -488,27 +451,27 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#erase/0>
   pub fn clear() -> Vec<(Atom, Term)> {
-    Self::with(|this| bifs::process_dict_clear(this))
+    Self::with(bifs::process_dict_clear)
   }
 
   /// Returns a list of all key-value pairs in the process dictionary.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get/0>
   pub fn pairs() -> Vec<(Atom, Term)> {
-    Self::with(|this| bifs::process_dict_pairs(this))
+    Self::with(bifs::process_dict_pairs)
   }
 
   /// Returns a list of all keys in the process dictionary.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get_keys/0>
   pub fn keys() -> Vec<Atom> {
-    Self::with(|this| bifs::process_dict_keys(this))
+    Self::with(bifs::process_dict_keys)
   }
 
   /// Returns a list of all values in the process dictionary.
   ///
   /// REF: **N/A**
   pub fn values() -> Vec<Term> {
-    Self::with(|this| bifs::process_dict_values(this))
+    Self::with(bifs::process_dict_values)
   }
 }

@@ -14,5 +14,8 @@ pub use self::dest::InternalDest;
 pub use self::pids::ExternalPid;
 pub use self::pids::InternalPid;
 pub use self::pids::ProcessId;
+pub use self::refs::AliasRef;
 pub use self::refs::ExternalRef;
 pub use self::refs::InternalRef;
+pub use self::refs::MonitorRef;
+pub use self::refs::TimerRef;
