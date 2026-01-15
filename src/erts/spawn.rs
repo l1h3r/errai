@@ -1,6 +1,6 @@
 use crate::erts::Runtime;
 use crate::lang::InternalPid;
-use crate::lang::InternalRef;
+use crate::lang::MonitorRef;
 
 // -----------------------------------------------------------------------------
 // Spawn Config
@@ -74,7 +74,7 @@ pub enum SpawnHandle {
   /// A normal process.
   Process(InternalPid),
   /// A monitored process.
-  Monitor(InternalPid, InternalRef),
+  Monitor(InternalPid, MonitorRef),
 }
 
 impl SpawnHandle {

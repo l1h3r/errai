@@ -5,6 +5,7 @@ use parking_lot::RwLock;
 use std::num::NonZeroU64;
 use std::ops::Deref;
 use std::sync::OnceLock;
+use std::sync::atomic::Ordering;
 use tokio::task::JoinHandle;
 use triomphe::Arc;
 
@@ -12,10 +13,25 @@ use crate::bifs;
 use crate::core::ProcDict;
 use crate::core::ProcLink;
 use crate::core::ProcMail;
+use crate::core::ProcMonitor;
 use crate::core::ProcSend;
+use crate::erts::DynMessage;
+use crate::erts::SignalDemonitor;
+use crate::erts::SignalEmit;
+use crate::erts::SignalExit;
+use crate::erts::SignalLink;
+use crate::erts::SignalLinkExit;
+use crate::erts::SignalMonitor;
+use crate::erts::SignalMonitorDown;
+use crate::erts::SignalSend;
+use crate::erts::SignalUnlink;
+use crate::erts::SignalUnlinkAck;
 use crate::lang::Atom;
 use crate::lang::Exit;
+use crate::lang::ExternalDest;
 use crate::lang::InternalPid;
+use crate::lang::MonitorRef;
+use crate::tyre::num::AtomicNzU64;
 
 // -----------------------------------------------------------------------------
 // Process Flags
@@ -99,6 +115,8 @@ pub(crate) struct ProcReadOnly {
   pub(crate) root: Option<InternalPid>,
   /// Handle to the internal process task.
   pub(crate) task: OnceLock<JoinHandle<()>>,
+  /// Process-unique identifier.
+  pub(crate) puid: AtomicNzU64,
 }
 
 impl ProcReadOnly {
@@ -112,7 +130,69 @@ impl ProcReadOnly {
       send,
       root,
       task: OnceLock::new(),
+      puid: AtomicNzU64::new(),
     }
+  }
+
+  /// Returns the next process unique identifier.
+  #[inline]
+  pub(crate) fn next_puid(&self) -> NonZeroU64 {
+    self.puid.fetch_add(1, Ordering::Relaxed)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Signals
+  // ---------------------------------------------------------------------------
+
+  #[inline]
+  pub(crate) fn send_message<T>(&self, from: InternalPid, data: T)
+  where
+    T: Into<DynMessage>,
+  {
+    SignalSend::new(from, data.into()).emit(self);
+  }
+
+  #[inline]
+  pub(crate) fn send_exit(&self, from: InternalPid, exit: Exit) {
+    SignalExit::new(from, exit).emit(self);
+  }
+
+  #[inline]
+  pub(crate) fn send_link(&self, from: InternalPid) {
+    SignalLink::new(from).emit(self);
+  }
+
+  #[inline]
+  pub(crate) fn send_link_exit(&self, from: InternalPid, exit: Exit) {
+    SignalLinkExit::new(from, exit).emit(self);
+  }
+
+  #[inline]
+  pub(crate) fn send_unlink(&self, from: InternalPid, ulid: NonZeroU64) {
+    SignalUnlink::new(from, ulid).emit(self);
+  }
+
+  #[inline]
+  pub(crate) fn send_unlink_ack(&self, from: InternalPid, ulid: NonZeroU64) {
+    SignalUnlinkAck::new(from, ulid).emit(self);
+  }
+
+  #[inline]
+  pub(crate) fn send_monitor<T>(&self, from: InternalPid, mref: MonitorRef, item: T)
+  where
+    T: Into<ExternalDest>,
+  {
+    SignalMonitor::new(from, mref, item.into()).emit(self);
+  }
+
+  #[inline]
+  pub(crate) fn send_monitor_down(&self, from: InternalPid, mref: MonitorRef, info: Exit) {
+    SignalMonitorDown::new(from, mref, info).emit(self);
+  }
+
+  #[inline]
+  pub(crate) fn send_demonitor(&self, from: InternalPid, mref: MonitorRef) {
+    SignalDemonitor::new(from, mref).emit(self);
   }
 }
 
@@ -127,10 +207,12 @@ pub(crate) struct ProcInternal {
   pub(crate) flags: ProcessFlags,
   /// Internal message queue.
   pub(crate) inbox: ProcMail,
-  /// Process-unique identifier.
-  pub(crate) puid: NonZeroU64,
   /// Linked process information.
   pub(crate) links: HashMap<InternalPid, ProcLink>,
+  /// The state of monitors requested by the process.
+  pub(crate) monitor_send: HashMap<MonitorRef, ProcMonitor>,
+  /// The state of monitors received by the process.
+  pub(crate) monitor_recv: HashMap<MonitorRef, ProcMonitor>,
   /// The process dictionary.
   pub(crate) dictionary: ProcDict,
   /// Process I/O leader.
@@ -138,9 +220,6 @@ pub(crate) struct ProcInternal {
 }
 
 impl ProcInternal {
-  /// SAFETY: The value is `1`.
-  pub(crate) const NZ_ONE: NonZeroU64 = unsafe { NonZeroU64::new_unchecked(1) };
-
   /// Create a new `ProcInternal`.
   ///
   /// Note: `group_leader` is set to invalid value.
@@ -150,23 +229,11 @@ impl ProcInternal {
       flags: ProcessFlags::empty(),
       inbox: ProcMail::new(),
       links: HashMap::new(),
-      puid: Self::NZ_ONE,
+      monitor_send: HashMap::new(),
+      monitor_recv: HashMap::new(),
       dictionary: ProcDict::new(),
       group_leader: InternalPid::from_bits(0),
     }
-  }
-
-  /// Returns the next process-unique identifier.
-  #[inline]
-  pub(crate) fn next_puid(&mut self) -> NonZeroU64 {
-    let next: NonZeroU64 = self.puid;
-
-    self.puid = match self.puid.checked_add(1) {
-      Some(value) => value,
-      None => Self::NZ_ONE,
-    };
-
-    next
   }
 }
 

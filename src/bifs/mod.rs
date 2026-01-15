@@ -8,10 +8,11 @@ use parking_lot::RwLockWriteGuard;
 use std::mem::MaybeUninit;
 use std::num::NonZeroU64;
 use std::panic::AssertUnwindSafe;
-use std::panic::catch_unwind;
 use std::sync::LazyLock;
 use tokio::task;
 use tokio::task::futures::TaskLocalFuture;
+use tracing::Span;
+use tracing::span;
 use triomphe::Arc;
 
 use crate::core::CatchUnwind;
@@ -20,6 +21,7 @@ use crate::core::ProcExternal;
 use crate::core::ProcInternal;
 use crate::core::ProcLink;
 use crate::core::ProcMail;
+use crate::core::ProcMonitor;
 use crate::core::ProcReadOnly;
 use crate::core::ProcRecv;
 use crate::core::ProcSend;
@@ -29,20 +31,18 @@ use crate::core::ProcessInfo;
 use crate::core::raise;
 use crate::core::unbounded_channel;
 use crate::erts::DynMessage;
-use crate::erts::ExitMessage;
 use crate::erts::Message;
 use crate::erts::ProcTable;
 use crate::erts::Process;
 use crate::erts::Runtime;
 use crate::erts::Signal;
+use crate::erts::SignalRecv;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
 use crate::lang::Atom;
 use crate::lang::Exit;
 use crate::lang::ExternalDest;
-use crate::lang::InternalDest;
 use crate::lang::InternalPid;
-use crate::lang::InternalRef;
 use crate::lang::MonitorRef;
 use crate::lang::ProcessId;
 use crate::lang::Term;
@@ -78,7 +78,7 @@ pub(crate) fn process_list() -> Vec<InternalPid> {
 // BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L1710
 //
 // TODO: Support terminating via reference
-pub(crate) fn process_exit<P>(this: &ProcTask, pid: P, reason: Exit)
+pub(crate) fn process_exit<P>(this: &ProcTask, pid: P, exit: Exit)
 where
   P: ProcessId,
 {
@@ -93,11 +93,7 @@ where
       return; // Never fail when sending to a non-existent PID.
     };
 
-    proc.readonly.send.send(Signal::Exit {
-      from: this.readonly.mpid,
-      reason,
-      linked: false,
-    });
+    proc.readonly.send_exit(this.readonly.mpid, exit);
   });
 }
 
@@ -121,7 +117,7 @@ pub(crate) fn process_set_flag(this: &ProcTask, flag: ProcessFlags, value: bool)
 
 // BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_bif_info.c#L1558
 pub(crate) fn process_info(_this: &ProcTask, _pid: InternalPid) -> Option<ProcessInfo> {
-  todo!()
+  todo!("Handle Process Info")
 }
 
 // -----------------------------------------------------------------------------
@@ -153,14 +149,8 @@ pub(crate) fn process_send(this: &ProcTask, dest: ExternalDest, term: Term) {
           return; // Never fail when sending to a non-existent PID.
         };
 
-        proc.readonly.send.send(Signal::Send {
-          from: this.readonly.mpid,
-          data: DynMessage::Term(term),
-        });
+        proc.readonly.send_message(this.readonly.mpid, term);
       });
-    }
-    ExternalDest::ExternalProc(pid) => {
-      todo!("Handle External PID Send - {pid}")
     }
     ExternalDest::InternalName(name) => {
       let Some(pid) = process_whereis(name) else {
@@ -172,11 +162,11 @@ pub(crate) fn process_send(this: &ProcTask, dest: ExternalDest, term: Term) {
           raise!(Error, BadArg, "unregistered name");
         };
 
-        proc.readonly.send.send(Signal::Send {
-          from: this.readonly.mpid,
-          data: DynMessage::Term(term),
-        });
+        proc.readonly.send_message(this.readonly.mpid, term);
       });
+    }
+    ExternalDest::ExternalProc(pid) => {
+      todo!("Handle External PID Send - {pid}")
     }
     ExternalDest::ExternalName(name, node) => {
       todo!("Handle External Name Send - {name} @ {node}")
@@ -218,37 +208,27 @@ where
   let pid: InternalPid = pid.into_internal();
 
   if this.readonly.mpid == pid {
-    return; // Can't link to ourselves
+    return; // Ignore, we can't link to ourselves
   }
-
-  let Some(dest) = REGISTERED_PROCS.get(pid) else {
-    this.readonly.send.send(Signal::Exit {
-      from: pid,
-      reason: Exit::NOPROC,
-      linked: true,
-    });
-    return;
-  };
-
-  let dest: ProcSend = dest.readonly.send.clone();
 
   match this.internal.lock().links.entry(pid) {
     Entry::Occupied(mut entry) => {
       if entry.get().is_enabled() {
-        return; // No need to update an active link
+        return; // Ignore, we dont need to update an active link
       }
 
       entry.get_mut().enable();
     }
     Entry::Vacant(entry) => {
-      entry.insert(ProcLink::new(dest.downgrade()));
+      entry.insert(ProcLink::new());
     }
   }
 
-  dest.send(Signal::Link {
-    from: this.readonly.mpid,
-    send: this.readonly.send.downgrade(),
-  });
+  if let Some(proc) = process_find(pid) {
+    proc.readonly.send_link(this.readonly.mpid);
+  } else {
+    this.readonly.send_link_exit(pid, Exit::NOPROC);
+  }
 }
 
 // BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L1212
@@ -262,80 +242,79 @@ where
 
   let pid: InternalPid = pid.into_internal();
 
-  let mut guard: MutexGuard<'_, ProcInternal> = this.internal.lock();
+  match this.internal.lock().links.entry(pid) {
+    Entry::Occupied(mut entry) => {
+      if entry.get().is_disabled() {
+        return; // Ignore, we've been here before
+      }
 
-  let Some(link) = guard.links.get(&pid) else {
-    return; // No link to disable
-  };
+      if let Some(proc) = process_find(pid) {
+        let unlink: NonZeroU64 = this.readonly.next_puid();
 
-  if !link.is_enabled() {
-    return; // No need to update an inactive link
+        proc.readonly.send_unlink(this.readonly.mpid, unlink);
+
+        entry.get_mut().disable(unlink);
+      } else {
+        entry.remove();
+      }
+    }
+    Entry::Vacant(_) => {
+      return; // Ignore, we're not linked to PID
+    }
   }
-
-  let unlink: NonZeroU64 = guard.next_puid();
-
-  let Some(link) = guard.links.get_mut(&pid) else {
-    raise!(Error, SysInv, "invalid reborrow");
-  };
-
-  link.disable(unlink);
-
-  let Some(send) = link.sender() else {
-    return;
-  };
-
-  send.send(Signal::Unlink {
-    from: this.readonly.mpid,
-    send: this.readonly.send.downgrade(),
-    ulid: unlink,
-  });
 }
 
 // BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L753
 pub(crate) fn process_monitor(this: &ProcTask, item: ExternalDest) -> MonitorRef {
   match item {
     ExternalDest::InternalProc(pid) => {
-      let monitor: InternalRef = InternalRef::new_global();
+      let mref: MonitorRef = MonitorRef::new();
 
       if this.readonly.mpid == pid {
-        return MonitorRef::new(monitor); // Can't monitor ourselves
+        return mref; // Ignore, we can't monitor ourselves
       }
 
-      if let Some(dest) = REGISTERED_PROCS.get(pid) {
-        // TODO: Update local process state
+      match this.internal.lock().monitor_send.entry(mref) {
+        Entry::Occupied(_) => {
+          raise!(Error, SysInv, "duplicate monitor");
+        }
+        Entry::Vacant(entry) => {
+          entry.insert(ProcMonitor::new(this.readonly.mpid, item));
+        }
+      }
 
-        dest.readonly.send.send(Signal::Monitor {
-          from: this.readonly.mpid,
-          send: this.readonly.send.downgrade(),
-          mref: monitor,
-        });
+      if let Some(proc) = process_find(pid) {
+        proc.readonly.send_monitor(this.readonly.mpid, mref, pid);
       } else {
-        this.readonly.send.send(Signal::MonitorDown {
-          mref: monitor,
-          item: InternalDest::Proc(pid),
-          info: Exit::NOPROC,
-        });
+        this.readonly.send_monitor_down(pid, mref, Exit::NOPROC);
       }
 
-      MonitorRef::new(monitor)
-    }
-    ExternalDest::ExternalProc(pid) => {
-      todo!("Handle External PID Monitor - {pid}")
+      mref
     }
     ExternalDest::InternalName(name) => {
       if let Some(pid) = process_whereis(name) {
         process_monitor(this, ExternalDest::InternalProc(pid))
       } else {
-        let monitor: InternalRef = InternalRef::new_global();
+        let mref: MonitorRef = MonitorRef::new();
 
-        this.readonly.send.send(Signal::MonitorDown {
-          mref: monitor,
-          item: InternalDest::Name(name),
-          info: Exit::NOPROC,
-        });
+        match this.internal.lock().monitor_send.entry(mref) {
+          Entry::Occupied(_) => {
+            raise!(Error, SysInv, "duplicate monitor");
+          }
+          Entry::Vacant(entry) => {
+            entry.insert(ProcMonitor::new(this.readonly.mpid, item));
+          }
+        }
 
-        MonitorRef::new(monitor)
+        this
+          .readonly
+          .send_monitor_down(InternalPid::UNDEFINED, mref, Exit::NOPROC);
+
+        mref
       }
+    }
+    ExternalDest::ExternalProc(pid) => {
+      todo!("Handle External PID Monitor - {pid}")
     }
     ExternalDest::ExternalName(name, node) => {
       todo!("Handle External Name Monitor - {name} @ {node}")
@@ -344,8 +323,42 @@ pub(crate) fn process_monitor(this: &ProcTask, item: ExternalDest) -> MonitorRef
 }
 
 // BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L433
-pub(crate) fn process_demonitor(this: &ProcTask, reference: MonitorRef) {
-  todo!("Handle Internal Demonitor - {reference} - {this:?}")
+pub(crate) fn process_demonitor(this: &ProcTask, mref: MonitorRef) {
+  match this.internal.lock().monitor_send.entry(mref) {
+    Entry::Occupied(entry) => {
+      let state: ProcMonitor = entry.remove();
+
+      match state.target() {
+        ExternalDest::InternalProc(pid) => {
+          if let Some(proc) = process_find(pid) {
+            proc.readonly.send_demonitor(this.readonly.mpid, mref);
+          } else {
+            return; // Ignore, dead PID
+          }
+        }
+        ExternalDest::InternalName(name) => {
+          if let Some(pid) = process_whereis(name) {
+            if let Some(proc) = process_find(pid) {
+              proc.readonly.send_demonitor(this.readonly.mpid, mref);
+            } else {
+              return; // Ignore, dead PID
+            }
+          } else {
+            return; // Ignore, dead PID
+          }
+        }
+        ExternalDest::ExternalProc(pid) => {
+          todo!("Handle External PID demonitor - {pid}")
+        }
+        ExternalDest::ExternalName(name, node) => {
+          todo!("Handle External Name demonitor - {name} @ {node}")
+        }
+      }
+    }
+    Entry::Vacant(_) => {
+      return; // Ignore, we're not monitoring this ref
+    }
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -398,6 +411,7 @@ pub(crate) fn process_unregister(this: &ProcTask, name: Atom) {
 
   process_with(this, *entry.get(), |proc| {
     let Some(proc) = proc else {
+      entry.remove();
       return; // Ignore, the PID was just terminated
     };
 
@@ -489,7 +503,10 @@ pub(crate) fn translate_pid(pid: InternalPid) -> Option<(u32, u32)> {
 // -----------------------------------------------------------------------------
 
 pub(crate) fn process_delete(this: &mut ProcTask) {
-  tracing::trace!(pid = %this.readonly.mpid, "Proc Delete (1)");
+  let span: Span = tracing::trace_span!("Proc Delete", pid = %this.readonly.mpid);
+  let span_guard: span::Entered<'_> = span.enter();
+
+  tracing::trace!("(1) - Lock");
 
   let mut internal: MutexGuard<'_, ProcInternal> = this.internal.lock();
   let mut external: RwLockWriteGuard<'_, ProcExternal> = this.external.write();
@@ -499,42 +516,50 @@ pub(crate) fn process_delete(this: &mut ProcTask) {
     None => Exit::Atom(Atom::new("panic")),
   };
 
-  tracing::trace!(pid = %this.readonly.mpid, ?exit, "Proc Delete (2)");
+  tracing::trace!(?exit, "(2) - Unregister");
 
   if let Some(name) = external.name.take().as_ref() {
     if let None = REGISTERED_NAMES.write().remove(name) {
-      tracing::error!(pid = %this.readonly.mpid, %name, "Proc Delete (dangling name)");
+      tracing::error!(%name, "dangling name");
     }
   }
 
-  tracing::trace!(pid = %this.readonly.mpid, "Proc Delete (3)");
+  tracing::trace!("(3) - Links");
 
-  for (_pid, state) in internal.links.drain() {
-    if !state.is_enabled() {
+  for (pid, state) in internal.links.drain() {
+    if state.is_disabled() {
       continue;
     }
 
-    let Some(send) = state.sender() else {
-      continue;
-    };
-
-    send.send(Signal::Exit {
-      from: this.readonly.mpid,
-      reason: exit.clone(),
-      linked: true,
-    });
+    if let Some(proc) = process_find(pid) {
+      proc
+        .readonly
+        .send_link_exit(this.readonly.mpid, exit.clone());
+    }
   }
 
-  tracing::trace!(pid = %this.readonly.mpid, "Proc Delete (4)");
+  tracing::trace!("(4) - Monitors");
+
+  for (mref, state) in internal.monitor_recv.drain() {
+    if let Some(proc) = process_find(state.origin()) {
+      proc
+        .readonly
+        .send_monitor_down(state.origin(), mref, exit.clone());
+    }
+  }
+
+  tracing::trace!("(5) - State");
 
   if let None = REGISTERED_PROCS.remove(this.readonly.mpid) {
-    tracing::error!(pid = %this.readonly.mpid, "Proc Delete (dangling state)");
+    tracing::error!("dangling state");
   };
 
-  tracing::trace!(pid = %this.readonly.mpid, "Proc Delete (5)");
+  tracing::trace!("(6) - Unlock");
 
   drop(internal);
   drop(external);
+
+  drop(span_guard);
 }
 
 fn process_create(parent: Option<&ProcTask>, options: SpawnConfig) -> (Arc<ProcData>, ProcRecv) {
@@ -605,17 +630,17 @@ where
     tokio::pin!(safe_task);
 
     let exit: Exit = 'run: loop {
+      while let Ok(signal) = queue.try_recv() {
+        if let Some(exit) = Process::with(|this| process_handle_signal(this, signal)) {
+          break 'run exit;
+        }
+      }
+
       tokio::select! {
         biased;
         Some(signal) = queue.recv() => {
-          let result: Result<Option<Exit>, _> = catch_unwind(AssertUnwindSafe(|| {
-            Process::with(|this| process_handle_signal(this, signal))
-          }));
-
-          match result.transpose() {
-            Some(Ok(exit)) => break 'run exit,
-            Some(Err(term)) => break 'run Exit::Term(Term::new_error(term)),
-            None => continue 'run,
+          if let Some(exit) = Process::with(|this| process_handle_signal(this, signal)) {
+            break 'run exit;
           }
         }
         result = &mut safe_task => match result {
@@ -645,7 +670,25 @@ where
   }
 
   // ---------------------------------------------------------------------------
-  // 4. Spawn Task
+  // 4. Initialize Monitor
+  // ---------------------------------------------------------------------------
+
+  let mut handle: SpawnHandle = SpawnHandle::Process(proc.readonly.mpid);
+
+  if options.monitor {
+    let Some(root) = parent else {
+      raise!(Error, SysInv, "monitor without parent");
+    };
+
+    let mtarget: ExternalDest = ExternalDest::InternalProc(proc.readonly.mpid);
+    let monitor: MonitorRef = process_monitor(root, mtarget);
+    let mhandle: SpawnHandle = SpawnHandle::Monitor(proc.readonly.mpid, monitor);
+
+    handle = mhandle;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 5. Spawn Task
   // ---------------------------------------------------------------------------
 
   if let Some(root) = parent {
@@ -659,203 +702,23 @@ where
   };
 
   // ---------------------------------------------------------------------------
-  // 5. Return
+  // 6. Return
   // ---------------------------------------------------------------------------
 
-  SpawnHandle::Process(proc.readonly.mpid)
-}
-
-// -----------------------------------------------------------------------------
-// BIFs - Signal Handling
-// -----------------------------------------------------------------------------
-
-fn process_handle_signal(this: &ProcTask, signal: Signal) -> Option<Exit> {
-  let mut guard: MutexGuard<'_, ProcInternal> = this.internal.lock();
-
-  match signal {
-    Signal::Exit {
-      from,
-      reason,
-      linked: false,
-    } => {
-      tracing::trace!(pid = %this.readonly.mpid, %from, %reason, "Proc Exit");
-
-      match reason {
-        Exit::Atom(atom) if atom == Atom::NORMAL => {
-          if guard.flags.contains(ProcessFlags::TRAP_EXIT) {
-            tracing::trace!("Proc Exit (trap)");
-            this.readonly.send.send(Signal::Send {
-              from,
-              data: DynMessage::Exit(ExitMessage::new(from, reason)),
-            });
-          } else if this.readonly.mpid == from {
-            tracing::trace!("Proc Exit (terminate)");
-            return Some(reason);
-          } else {
-            tracing::trace!("Proc Exit (ignore)");
-          }
-        }
-        Exit::Atom(atom) if atom == Atom::KILLED => {
-          tracing::trace!("Proc Exit (terminate)");
-          return Some(reason);
-        }
-        Exit::Atom(_) | Exit::Term(_) => {
-          if guard.flags.contains(ProcessFlags::TRAP_EXIT) {
-            tracing::trace!("Proc Exit (trap)");
-            this.readonly.send.send(Signal::Send {
-              from,
-              data: DynMessage::Exit(ExitMessage::new(from, reason)),
-            });
-          } else {
-            tracing::trace!("Proc Exit (terminate)");
-            return Some(reason);
-          }
-        }
-      }
-    }
-
-    // Exit signal handling (linked):
-    //
-    // If the link state exists and the process is trapping exits, the signal
-    // is converted to an `ExitMessage` and delivered to the inbox.
-    // If the reason is not normal, the receiving process is terminated.
-    Signal::Exit {
-      from,
-      reason,
-      linked: true,
-    } => {
-      tracing::trace!(pid = %this.readonly.mpid, %from, %reason, "Proc Link Exit");
-
-      let Some(state) = guard.links.remove(&from) else {
-        tracing::trace!("Proc Link Exit (dead)");
-        return None;
-      };
-
-      if state.is_enabled() {
-        if guard.flags.contains(ProcessFlags::TRAP_EXIT) {
-          tracing::trace!("Proc Link Exit (trap)");
-          this.readonly.send.send(Signal::Send {
-            from: this.readonly.mpid,
-            data: DynMessage::Exit(ExitMessage::new(from, reason)),
-          });
-        } else if reason.is_normal() {
-          tracing::trace!("Proc Link Exit (ignore)");
-        } else {
-          tracing::trace!("Proc Link Exit (terminate)");
-          return Some(reason);
-        }
-      } else {
-        tracing::trace!("Proc Link Exit (disabled)");
-      }
-    }
-
-    // Send signal handling:
-    //
-    // The content of the message is moved to the internal inbox buffer.
-    Signal::Send { from, data } => {
-      tracing::trace!(pid = %this.readonly.mpid, %from, "Proc Send");
-      guard.inbox.push(data);
-    }
-
-    // Link signal handling:
-    //
-    // If no link state exists for the sender, a default enabled state is
-    // inserted; otherwise, the signal is dropped.
-    Signal::Link { from, send } => {
-      tracing::trace!(pid = %this.readonly.mpid, %from, "Proc Link");
-
-      match guard.links.entry(from) {
-        Entry::Occupied(_) => {
-          tracing::trace!("Proc Link (occupied)");
-        }
-        Entry::Vacant(entry) => {
-          tracing::trace!("Proc Link (vacant)");
-          entry.insert(ProcLink::new(send));
-        }
-      }
-    }
-
-    // Unlink signal handling:
-    //
-    // If the link state exists and is enabled, it is removed and the sender
-    // receives an `UnlinkAck` signal. If not, the signal is dropped.
-    Signal::Unlink { from, send, ulid } => {
-      tracing::trace!(pid = %this.readonly.mpid, %from, %ulid, "Proc Unlink");
-
-      match guard.links.entry(from) {
-        Entry::Occupied(entry) => {
-          tracing::trace!("Proc Unlink (occupied)");
-
-          if entry.get().is_disabled() {
-            tracing::trace!("Proc Unlink (disabled)");
-            return None;
-          }
-
-          let _ignore: ProcLink = entry.remove();
-
-          if let Some(send) = send.upgrade() {
-            tracing::trace!("Proc Unlink (ack)");
-            send.send(Signal::UnlinkAck {
-              from: this.readonly.mpid,
-              ulid,
-            });
-          } else {
-            tracing::trace!("Proc Unlink (dead)");
-          }
-        }
-        Entry::Vacant(_) => {
-          tracing::trace!("Proc Unlink (vacant)");
-        }
-      }
-    }
-
-    // UnlinkAck signal handling:
-    //
-    // If the link state exists, is enabled, and the given `ulid` matches,
-    // the link state is removed. Otherwise, the signal is dropped.
-    Signal::UnlinkAck { from, ulid } => {
-      tracing::trace!(pid = %this.readonly.mpid, %from, %ulid, "Proc UnlinkAck");
-
-      match guard.links.entry(from) {
-        Entry::Occupied(entry) => {
-          tracing::trace!("Proc UnlinkAck (occupied)");
-
-          let state: &ProcLink = entry.get();
-
-          if state.is_disabled() {
-            if state.matches(ulid) {
-              tracing::trace!("Proc UnlinkAck (remove)");
-              let _ignore: ProcLink = entry.remove();
-            } else {
-              tracing::trace!("Proc UnlinkAck (stale)");
-            }
-          } else {
-            tracing::trace!("Proc UnlinkAck (enabled)");
-          }
-        }
-        Entry::Vacant(_) => {
-          tracing::trace!("Proc UnlinkAck (vacant)");
-        }
-      }
-    }
-
-    Signal::Monitor { from, send, mref } => {
-      todo!("Handle Signal::Monitor {from}, {send:?}, {mref}")
-    }
-    Signal::MonitorDown { mref, item, info } => {
-      todo!("Handle Signal::MonitorDown {mref}, {item}, {info}")
-    }
-    Signal::Demonitor { from, mref } => {
-      todo!("Handle Signal::Demonitor {from}, {mref}")
-    }
-  }
-
-  None
+  handle
 }
 
 // -----------------------------------------------------------------------------
 // Misc. Internal Utils
 // -----------------------------------------------------------------------------
+
+pub(crate) fn process_find(pid: InternalPid) -> Option<Arc<ProcData>> {
+  REGISTERED_PROCS.get(pid)
+}
+
+fn process_handle_signal(this: &ProcTask, signal: Signal) -> Option<Exit> {
+  signal.recv(&this.readonly, &mut this.internal.lock())
+}
 
 fn process_with<F, R>(this: &ProcTask, pid: InternalPid, f: F) -> R
 where
@@ -867,7 +730,7 @@ where
   if this.readonly.mpid == pid {
     data = this;
   } else {
-    let Some(context) = REGISTERED_PROCS.get(pid) else {
+    let Some(context) = process_find(pid) else {
       return f(None);
     };
 

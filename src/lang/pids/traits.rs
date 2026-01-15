@@ -11,7 +11,7 @@ mod private {
 impl private::Sealed for ExternalPid {}
 impl private::Sealed for InternalPid {}
 
-pub trait ProcessId: private::Sealed + Debug + Display {
+pub trait ProcessId: private::Sealed + Copy + Debug + Display {
   const DISTRIBUTED: bool;
 
   /// Converts `self` into an internal PID.

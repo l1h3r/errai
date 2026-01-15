@@ -1,24 +1,24 @@
 use std::num::NonZeroU64;
 
-use crate::core::ProcSend;
-use crate::core::WeakProcSend;
+use crate::lang::ExternalDest;
+use crate::lang::InternalPid;
+
+// -----------------------------------------------------------------------------
+// Proc Link
+// -----------------------------------------------------------------------------
 
 /// State of a linked process.
 #[derive(Debug)]
-#[repr(C)]
+#[repr(transparent)]
 pub(crate) struct ProcLink {
-  sender: WeakProcSend,
   unlink: Option<NonZeroU64>,
 }
 
 impl ProcLink {
   /// Creates a new `ProcLink`.
   #[inline]
-  pub(crate) fn new(sender: WeakProcSend) -> Self {
-    Self {
-      sender,
-      unlink: None,
-    }
+  pub(crate) fn new() -> Self {
+    Self { unlink: None }
   }
 
   /// Returns `true` if the link is enabled.
@@ -50,12 +50,36 @@ impl ProcLink {
   pub(crate) fn matches(&self, ulid: NonZeroU64) -> bool {
     self.unlink.map(|id| id == ulid).unwrap_or(false)
   }
+}
 
-  /// Tries to convert the associated `WeakProcSend` into a `ProcSend`.
-  ///
-  /// Returns `Some` if the channel is still open, otherwise `None`.
+// -----------------------------------------------------------------------------
+// Proc Monitor
+// -----------------------------------------------------------------------------
+
+/// State of a monitored process.
+#[derive(Debug)]
+#[repr(C)]
+pub(crate) struct ProcMonitor {
+  origin: InternalPid,
+  target: ExternalDest,
+}
+
+impl ProcMonitor {
+  /// Creates a new `ProcMonitor`.
   #[inline]
-  pub(crate) fn sender(&self) -> Option<ProcSend> {
-    self.sender.upgrade()
+  pub(crate) const fn new(origin: InternalPid, target: ExternalDest) -> Self {
+    Self { origin, target }
+  }
+
+  /// Returns the monitor origin process.
+  #[inline]
+  pub(crate) fn origin(&self) -> InternalPid {
+    self.origin
+  }
+
+  /// Returns the monitor target process.
+  #[inline]
+  pub(crate) fn target(&self) -> ExternalDest {
+    self.target
   }
 }

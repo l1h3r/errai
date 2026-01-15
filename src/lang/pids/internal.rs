@@ -24,6 +24,8 @@ impl InternalPid {
   pub(crate) const NUMBER_BITS: u32 = 28;
   pub(crate) const SERIAL_BITS: u32 = Self::PID_BITS - Self::NUMBER_BITS;
 
+  pub(crate) const UNDEFINED: Self = Self::from_bits(u64::MAX);
+
   /// Creates a new `InternalPid` from the given `bits`.
   #[inline]
   pub(crate) const fn from_bits(bits: u64) -> Self {

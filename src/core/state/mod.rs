@@ -10,6 +10,7 @@ pub(crate) use self::process_data::ProcReadOnly;
 pub(crate) use self::process_data::ProcTask;
 pub(crate) use self::process_dict::ProcDict;
 pub(crate) use self::process_link::ProcLink;
+pub(crate) use self::process_link::ProcMonitor;
 pub(crate) use self::signal_queue::ProcMail;
 pub(crate) use self::signal_queue::ProcRecv;
 pub(crate) use self::signal_queue::ProcSend;

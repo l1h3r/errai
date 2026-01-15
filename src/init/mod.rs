@@ -190,12 +190,15 @@ where
         DynMessage::Term(_term) => {
           // Ignore messages here, we poll and drop terms to keep the queue small.
         }
-        DynMessage::Exit(exit) if *exit.sender() == application => {
+        DynMessage::Exit(exit) if exit.from() == application => {
           tracing::info!(?exit, "Runtime shutdown initialized");
           break 'run;
         }
         DynMessage::Exit(_exit) => {
           // We only care about exit messages sent from the app process.
+        }
+        DynMessage::Down(_down) => {
+          // We don't care about monitor messages.
         }
       }
     }

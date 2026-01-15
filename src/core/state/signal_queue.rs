@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::WeakUnboundedSender;
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio::task;
 
 use crate::core::ProcTask;
@@ -127,6 +128,11 @@ impl ProcRecv {
   #[inline]
   pub(crate) async fn recv(&mut self) -> Option<Signal> {
     self.inner.recv().await
+  }
+
+  #[inline]
+  pub(crate) fn try_recv(&mut self) -> Result<Signal, TryRecvError> {
+    self.inner.try_recv()
   }
 }
 

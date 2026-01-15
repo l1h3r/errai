@@ -18,7 +18,6 @@ use crate::lang::Exit;
 use crate::lang::ExternalDest;
 use crate::lang::InternalDest;
 use crate::lang::InternalPid;
-use crate::lang::InternalRef;
 use crate::lang::Item;
 use crate::lang::MonitorRef;
 use crate::lang::ProcessId;
@@ -181,7 +180,7 @@ impl Process {
   /// Spawns a new atomically monitored process to handle `future`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#spawn_monitor/1>
-  pub fn spawn_monitor<F>(future: F) -> (InternalPid, InternalRef)
+  pub fn spawn_monitor<F>(future: F) -> (InternalPid, MonitorRef)
   where
     F: Future<Output = ()> + Send + 'static,
   {
