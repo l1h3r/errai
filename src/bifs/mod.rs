@@ -9,6 +9,7 @@ use std::mem::MaybeUninit;
 use std::num::NonZeroU64;
 use std::panic::AssertUnwindSafe;
 use std::sync::LazyLock;
+use std::time::Duration;
 use tokio::task;
 use tokio::task::futures::TaskLocalFuture;
 use tracing::Span;
@@ -42,10 +43,12 @@ use crate::erts::SpawnHandle;
 use crate::lang::Atom;
 use crate::lang::Exit;
 use crate::lang::ExternalDest;
+use crate::lang::InternalDest;
 use crate::lang::InternalPid;
 use crate::lang::MonitorRef;
 use crate::lang::ProcessId;
 use crate::lang::Term;
+use crate::lang::TimerRef;
 
 // A table mapping internal process identifiers to process data.
 static REGISTERED_PROCS: LazyLock<ProcTable<ProcData>> =
@@ -95,6 +98,10 @@ where
 
     proc.readonly.send_exit(this.readonly.mpid, exit);
   });
+}
+
+pub(crate) fn process_alive(_this: &ProcTask, _pid: InternalPid) -> bool {
+  todo!("Handle Process Alive")
 }
 
 // BEAM Builtin: N/A
@@ -359,6 +366,30 @@ pub(crate) fn process_demonitor(this: &ProcTask, mref: MonitorRef) {
       return; // Ignore, we're not monitoring this ref
     }
   }
+}
+
+// -----------------------------------------------------------------------------
+// Timers
+// -----------------------------------------------------------------------------
+
+pub(crate) fn process_timer_create<T>(
+  this: &ProcTask,
+  dest: InternalDest,
+  term: T,
+  time: Duration,
+) -> TimerRef
+where
+  T: Send + 'static,
+{
+  todo!("TODO: Handle Process Timer Create")
+}
+
+pub(crate) fn process_timer_stop(timer: TimerRef, non_blocking: bool) -> Option<Duration> {
+  todo!("TODO: Handle Process Timer Stop")
+}
+
+pub(crate) fn process_timer_read(timer: TimerRef, non_blocking: bool) -> Option<Duration> {
+  todo!("TODO: Handle Process Timer Read")
 }
 
 // -----------------------------------------------------------------------------

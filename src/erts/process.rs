@@ -107,8 +107,8 @@ impl Process {
 
   /// Returns `true` if the process exists and is alive, that is, is not exiting
   /// and has not exited. Otherwise returns `false`.
-  pub fn alive(_pid: InternalPid) -> bool {
-    todo!("alive/1")
+  pub fn alive(pid: InternalPid) -> bool {
+    Self::with(|this| bifs::process_alive(this, pid))
   }
 
   /// Returns the process flags of the calling process.
@@ -333,11 +333,11 @@ impl Process {
   /// Sends `message` to given `destination` after `time` delay.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#send_after/3>
-  pub fn send_after<T>(_dest: impl Into<InternalDest>, _term: T, _time: Duration) -> TimerRef
+  pub fn send_after<T>(dest: impl Into<InternalDest>, term: T, time: Duration) -> TimerRef
   where
     T: Send + 'static,
   {
-    todo!("send_after/3")
+    Self::with(|this| bifs::process_timer_create(this, dest.into(), term, time))
   }
 
   /// Cancels a timer returned by [`Process::send_after`].
@@ -349,8 +349,8 @@ impl Process {
   /// not tell you if the timeout message has arrived at its destination yet.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#cancel_timer/1>
-  pub fn cancel_timer(_timer: TimerRef) -> Option<Duration> {
-    todo!("cancel_timer/1")
+  pub fn cancel_timer(timer: TimerRef, non_blocking: bool) -> Option<Duration> {
+    bifs::process_timer_stop(timer, non_blocking)
   }
 
   /// Reads a timer created by [`Process::send_after`].
@@ -362,8 +362,8 @@ impl Process {
   /// not tell you if the timeout message has arrived at its destination yet.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#read_timer/1>
-  pub fn read_timer(_reference: TimerRef) -> Option<Duration> {
-    todo!("read_timer/1")
+  pub fn read_timer(timer: TimerRef, non_blocking: bool) -> Option<Duration> {
+    bifs::process_timer_read(timer, non_blocking)
   }
 
   // ---------------------------------------------------------------------------

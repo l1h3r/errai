@@ -71,8 +71,6 @@ impl Term {
   }
 
   /// Returns `true` if the inner value is of type `T`.
-  ///
-  /// This performs a runtime type check using [`Any`].
   #[inline]
   pub fn is<T>(&self) -> bool
   where
@@ -81,9 +79,8 @@ impl Term {
     self.data.as_any().is::<T>()
   }
 
-  /// Returns a shared reference to the inner value if it is of type `T`.
-  ///
-  /// If the stored value does not match `T`, this returns `None`.
+  /// Returns a shared reference to the inner value if it is of type `T`,
+  /// otherwise returns `None`.
   #[inline]
   pub fn downcast_ref<T>(&self) -> Option<&T>
   where
@@ -92,9 +89,8 @@ impl Term {
     self.data.as_any().downcast_ref()
   }
 
-  /// Returns a mutable reference to the inner value if it is of type `T`.
-  ///
-  /// If the stored value does not match `T`, this returns `None`.
+  /// Returns a mutable reference to the inner value if it is of type `T`,
+  /// otherwise returns `None`.
   #[inline]
   pub fn downcast_mut<T>(&mut self) -> Option<&mut T>
   where
