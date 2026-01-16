@@ -1,21 +1,18 @@
-use bitflags::bitflags;
 use hashbrown::HashMap;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use std::num::NonZeroU64;
-use std::ops::Deref;
 use std::sync::OnceLock;
 use std::sync::atomic::Ordering;
 use tokio::task::JoinHandle;
-use triomphe::Arc;
 
-use crate::bifs;
-use crate::core::ProcDict;
-use crate::core::ProcLink;
-use crate::core::ProcMail;
-use crate::core::ProcMonitor;
-use crate::core::ProcSend;
+use crate::core::Atom;
+use crate::core::Exit;
+use crate::core::ExternalDest;
+use crate::core::InternalPid;
+use crate::core::MonitorRef;
 use crate::erts::DynMessage;
+use crate::erts::ProcessFlags;
 use crate::erts::SignalDemonitor;
 use crate::erts::SignalEmit;
 use crate::erts::SignalExit;
@@ -26,60 +23,12 @@ use crate::erts::SignalMonitorDown;
 use crate::erts::SignalSend;
 use crate::erts::SignalUnlink;
 use crate::erts::SignalUnlinkAck;
-use crate::lang::Atom;
-use crate::lang::Exit;
-use crate::lang::ExternalDest;
-use crate::lang::InternalPid;
-use crate::lang::MonitorRef;
+use crate::proc::ProcDict;
+use crate::proc::ProcLink;
+use crate::proc::ProcMail;
+use crate::proc::ProcMonitor;
+use crate::proc::ProcSend;
 use crate::tyre::num::AtomicNzU64;
-
-// -----------------------------------------------------------------------------
-// Process Flags
-//
-// Somewhat copied from:
-//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process.h#L1632
-// -----------------------------------------------------------------------------
-
-bitflags! {
-  #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-  pub struct ProcessFlags: u32 {
-    const TRAP_EXIT  = 1 << 22;
-    const ASYNC_DIST = 1 << 26;
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Process Info
-// -----------------------------------------------------------------------------
-
-/// Information about a process.
-#[derive(Debug)]
-pub struct ProcessInfo {}
-
-// -----------------------------------------------------------------------------
-// Proc Task Handle
-// -----------------------------------------------------------------------------
-
-#[derive(Debug)]
-#[repr(transparent)]
-pub(crate) struct ProcTask {
-  pub(crate) inner: Arc<ProcData>,
-}
-
-impl Drop for ProcTask {
-  fn drop(&mut self) {
-    bifs::process_delete(self);
-  }
-}
-
-impl Deref for ProcTask {
-  type Target = ProcData;
-
-  #[inline]
-  fn deref(&self) -> &Self::Target {
-    &*self.inner
-  }
-}
 
 // -----------------------------------------------------------------------------
 // Proc Data

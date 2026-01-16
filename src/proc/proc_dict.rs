@@ -5,9 +5,9 @@ use std::fmt::Formatter;
 use std::fmt::Result;
 use std::hash::Hash;
 
-use crate::erts::Runtime;
-use crate::lang::Atom;
-use crate::lang::Term;
+use crate::consts::CAP_PROC_DICTIONARY;
+use crate::core::Atom;
+use crate::core::Term;
 
 /// A process dictionary.
 #[repr(transparent)]
@@ -18,7 +18,7 @@ pub(crate) struct ProcDict {
 impl ProcDict {
   #[inline]
   fn alloc_table() -> HashMap<Atom, Term> {
-    HashMap::with_capacity(Runtime::CAP_PROC_DICTIONARY)
+    HashMap::with_capacity(CAP_PROC_DICTIONARY)
   }
 
   /// Creates a new `ProcDict`.

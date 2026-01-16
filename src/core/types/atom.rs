@@ -9,8 +9,36 @@ use std::ops::Deref;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
-use crate::erts::Runtime;
+use crate::core::AtomTable;
+use crate::core::AtomTableError;
+use crate::core::raise;
+
+// -----------------------------------------------------------------------------
+// Atom Table
+// -----------------------------------------------------------------------------
+
+static ATOM_TABLE: LazyLock<AtomTable> = LazyLock::new(|| {
+  let table: AtomTable = AtomTable::new();
+
+  assert_eq!(table.set("").unwrap(), Atom::EMPTY.into_slot());
+
+  assert_eq!(table.set("kill").unwrap(), Atom::KILL.into_slot());
+  assert_eq!(table.set("killed").unwrap(), Atom::KILLED.into_slot());
+  assert_eq!(table.set("normal").unwrap(), Atom::NORMAL.into_slot());
+
+  assert_eq!(table.set("noproc").unwrap(), Atom::NOPROC.into_slot());
+  assert_eq!(table.set("noconn").unwrap(), Atom::NOCONN.into_slot());
+
+  assert_eq!(table.set("undefined").unwrap(), Atom::UNDEFINED.into_slot());
+
+  table
+});
+
+// -----------------------------------------------------------------------------
+// Atom
+// -----------------------------------------------------------------------------
 
 /// A static literal term.
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
@@ -46,12 +74,24 @@ impl Atom {
   /// Creates a new `Atom` from the given `data`.
   #[inline]
   pub fn new(data: &str) -> Self {
-    Self::from_slot(Runtime::set_atom(data))
+    match ATOM_TABLE.set(data) {
+      Ok(slot) => Self::from_slot(slot),
+      Err(AtomTableError::AtomTooLarge) => {
+        raise!(Error, SysCap, "atom too large");
+      }
+      Err(AtomTableError::TooManyAtoms) => {
+        raise!(Error, SysCap, "too many atoms");
+      }
+    }
   }
 
   #[inline]
   pub fn as_str(&self) -> &'static str {
-    Runtime::get_atom(self.slot)
+    let Some(data) = ATOM_TABLE.get(self.slot) else {
+      raise!(Error, SysInv, "atom not found");
+    };
+
+    data
   }
 }
 

@@ -3,9 +3,9 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
-use crate::lang::Atom;
-use crate::lang::InternalPid;
-use crate::lang::ProcessId;
+use crate::core::Atom;
+use crate::core::InternalPid;
+use crate::core::ProcessId;
 
 /// An external process identifier.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]

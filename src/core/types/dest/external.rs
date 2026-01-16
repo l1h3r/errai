@@ -3,9 +3,9 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
-use crate::lang::Atom;
-use crate::lang::ExternalPid;
-use crate::lang::InternalPid;
+use crate::core::Atom;
+use crate::core::ExternalPid;
+use crate::core::InternalPid;
 
 /// Represents an internal or external message destination.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]

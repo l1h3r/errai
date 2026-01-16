@@ -1,7 +1,7 @@
 use std::num::NonZeroU64;
 
-use crate::lang::ExternalDest;
-use crate::lang::InternalPid;
+use crate::core::ExternalDest;
+use crate::core::InternalPid;
 
 // -----------------------------------------------------------------------------
 // Proc Link

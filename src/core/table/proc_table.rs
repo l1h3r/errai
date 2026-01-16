@@ -26,7 +26,7 @@ use std::sync::atomic::Ordering::Release;
 use triomphe::Arc;
 use triomphe::UniqueArc;
 
-use crate::lang::InternalPid;
+use crate::core::InternalPid;
 use crate::tyre::ptr::AtomicTaggedPtr;
 use crate::tyre::ptr::TaggedPtr;
 

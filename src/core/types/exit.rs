@@ -3,8 +3,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
-use crate::lang::Atom;
-use crate::lang::Term;
+use crate::core::Atom;
+use crate::core::Term;
 
 /// The reason for stopping the execution of a running process.
 #[derive(Clone)]

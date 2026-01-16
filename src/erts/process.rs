@@ -1,28 +1,27 @@
+use bitflags::bitflags;
 use std::time::Duration;
 use tokio::task;
 use tokio::task::futures::TaskLocalFuture;
 use tokio::time;
 
 use crate::bifs;
-use crate::core::ProcTask;
-use crate::core::ProcessFlags;
-use crate::core::ProcessInfo;
+use crate::proc::ProcTask;
 use crate::core::raise;
 use crate::erts::DynMessage;
 use crate::erts::Message;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
-use crate::lang::AliasRef;
-use crate::lang::Atom;
-use crate::lang::Exit;
-use crate::lang::ExternalDest;
-use crate::lang::InternalDest;
-use crate::lang::InternalPid;
-use crate::lang::Item;
-use crate::lang::MonitorRef;
-use crate::lang::ProcessId;
-use crate::lang::Term;
-use crate::lang::TimerRef;
+use crate::core::AliasRef;
+use crate::core::Atom;
+use crate::core::Exit;
+use crate::core::ExternalDest;
+use crate::core::InternalDest;
+use crate::core::InternalPid;
+use crate::core::Item;
+use crate::core::MonitorRef;
+use crate::core::ProcessId;
+use crate::core::Term;
+use crate::core::TimerRef;
 
 // -----------------------------------------------------------------------------
 // @data - Task Globals
@@ -30,6 +29,29 @@ use crate::lang::TimerRef;
 
 tokio::task_local! {
   static CONTEXT: ProcTask;
+}
+
+// -----------------------------------------------------------------------------
+// @type - Process Info
+// -----------------------------------------------------------------------------
+
+/// Information about a process.
+#[derive(Debug)]
+pub struct ProcessInfo {}
+
+// -----------------------------------------------------------------------------
+// @type - Process Flags
+//
+// Somewhat copied from:
+//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process.h#L1632
+// -----------------------------------------------------------------------------
+
+bitflags! {
+  #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+  pub struct ProcessFlags: u32 {
+    const TRAP_EXIT  = 1 << 22;
+    const ASYNC_DIST = 1 << 26;
+  }
 }
 
 // -----------------------------------------------------------------------------

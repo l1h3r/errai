@@ -5,7 +5,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
-use crate::lang::Item;
+use crate::core::Item;
 
 /// A boxed, type-erased value implementing [`Item`].
 ///

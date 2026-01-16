@@ -1,10 +1,10 @@
 //! Functions and types related to Errai nodes.
 
-use crate::lang::Atom;
-use crate::lang::ExternalPid;
-use crate::lang::ExternalRef;
-use crate::lang::InternalPid;
-use crate::lang::Term;
+use crate::core::Atom;
+use crate::core::ExternalPid;
+use crate::core::ExternalRef;
+use crate::core::InternalPid;
+use crate::core::Term;
 
 // -----------------------------------------------------------------------------
 // @error - NodeStartError

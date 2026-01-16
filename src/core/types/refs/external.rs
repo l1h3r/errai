@@ -3,8 +3,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
-use crate::lang::Atom;
-use crate::lang::InternalRef;
+use crate::core::Atom;
+use crate::core::InternalRef;
 
 /// An external reference.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]

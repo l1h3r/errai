@@ -1,16 +1,16 @@
-//! Core "lang" types of the Errai runtime system.
-
-mod core;
+mod atom;
 mod dest;
+mod exit;
+mod item;
 mod pids;
 mod refs;
+mod term;
 
-pub use self::core::Atom;
-pub use self::core::Exit;
-pub use self::core::Item;
-pub use self::core::Term;
+pub use self::atom::Atom;
 pub use self::dest::ExternalDest;
 pub use self::dest::InternalDest;
+pub use self::exit::Exit;
+pub use self::item::Item;
 pub use self::pids::ExternalPid;
 pub use self::pids::InternalPid;
 pub use self::pids::ProcessId;
@@ -19,3 +19,4 @@ pub use self::refs::ExternalRef;
 pub use self::refs::InternalRef;
 pub use self::refs::MonitorRef;
 pub use self::refs::TimerRef;
+pub use self::term::Term;

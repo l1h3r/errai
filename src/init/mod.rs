@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::thread;
 use tokio::runtime::Builder;
-use tokio::runtime::Runtime as TokioRuntime;
+use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::oneshot::Sender;
@@ -18,12 +18,12 @@ use tracing::subscriber;
 use tracing_subscriber::FmtSubscriber;
 
 use crate::bifs;
-use crate::core::ProcessFlags;
+use crate::consts;
+use crate::core::InternalPid;
+use crate::core::Term;
 use crate::erts::DynMessage;
 use crate::erts::Process;
-use crate::erts::Runtime;
-use crate::lang::InternalPid;
-use crate::lang::Term;
+use crate::erts::ProcessFlags;
 
 type PanicHook = Box<dyn Fn(&PanicHookInfo<'_>) + Sync + Send + 'static>;
 
@@ -45,7 +45,7 @@ where
 
   if let Err(error) = subscriber::set_global_default(build_tracing()) {
     eprintln!("Failed to initialize runtime: {error}");
-    process::exit(Runtime::E_CODE_FAILURE_INIT);
+    process::exit(consts::E_CODE_FAILURE_INIT);
   }
 
   // ---------------------------------------------------------------------------
@@ -69,11 +69,11 @@ where
   // 3. Configure Tokio Runtime
   // ---------------------------------------------------------------------------
 
-  let runtime: TokioRuntime = match build_runtime() {
+  let runtime: Runtime = match build_runtime() {
     Ok(runtime) => runtime,
     Err(error) => {
       tracing::error!(%error, "Failed to initialize runtime");
-      process::exit(Runtime::E_CODE_FAILURE_INIT);
+      process::exit(consts::E_CODE_FAILURE_INIT);
     }
   };
 
@@ -95,16 +95,16 @@ where
 
   if let Err(error) = runtime.block_on(task) {
     tracing::error!(%error, "Failed to execute runtime");
-    process::exit(Runtime::E_CODE_FAILURE_EXEC);
+    process::exit(consts::E_CODE_FAILURE_EXEC);
   }
 
   // ---------------------------------------------------------------------------
   // 5. Shutdown & Exit
   // ---------------------------------------------------------------------------
 
-  runtime.shutdown_timeout(Runtime::SHUTDOWN_TIMEOUT);
+  runtime.shutdown_timeout(consts::SHUTDOWN_TIMEOUT);
 
-  process::exit(Runtime::E_CODE_SUCCESS);
+  process::exit(consts::E_CODE_SUCCESS);
 }
 
 fn build_tracing() -> FmtSubscriber {
@@ -120,7 +120,7 @@ fn build_tracing() -> FmtSubscriber {
     .finish()
 }
 
-fn build_runtime() -> Result<TokioRuntime, Error> {
+fn build_runtime() -> Result<Runtime, Error> {
   // TODO: Maybe try and make use of the following hooks:
   //   - on_after_task_poll
   //   - on_before_task_poll
@@ -133,13 +133,13 @@ fn build_runtime() -> Result<TokioRuntime, Error> {
   Builder::new_multi_thread()
     .enable_io()
     .enable_time()
-    .event_interval(Runtime::DEFAULT_EVENT_INTERVAL)
-    .global_queue_interval(Runtime::DEFAULT_GLOBAL_QUEUE_INTERVAL)
-    .max_blocking_threads(Runtime::DEFAULT_MAX_BLOCKING_THREADS)
-    .max_io_events_per_tick(Runtime::DEFAULT_MAX_IO_EVENTS_PER_TICK)
-    .thread_keep_alive(Runtime::DEFAULT_THREAD_KEEP_ALIVE)
+    .event_interval(consts::DEFAULT_EVENT_INTERVAL)
+    .global_queue_interval(consts::DEFAULT_GLOBAL_QUEUE_INTERVAL)
+    .max_blocking_threads(consts::DEFAULT_MAX_BLOCKING_THREADS)
+    .max_io_events_per_tick(consts::DEFAULT_MAX_IO_EVENTS_PER_TICK)
+    .thread_keep_alive(consts::DEFAULT_THREAD_KEEP_ALIVE)
     .thread_name_fn(next_worker_name)
-    .thread_stack_size(Runtime::DEFAULT_THREAD_STACK_SIZE)
+    .thread_stack_size(consts::DEFAULT_THREAD_STACK_SIZE)
     .worker_threads(available_cpus())
     .build()
 }
@@ -147,7 +147,7 @@ fn build_runtime() -> Result<TokioRuntime, Error> {
 fn available_cpus() -> usize {
   match thread::available_parallelism() {
     Ok(count) => count.get(),
-    Err(_) => Runtime::DEFAULT_PARALLELISM,
+    Err(_) => consts::DEFAULT_PARALLELISM,
   }
 }
 
@@ -207,7 +207,7 @@ where
 
     if let Err(()) = shutdown.send(()) {
       tracing::error!("Failed to shut down runtime: channel closed");
-      process::exit(Runtime::E_CODE_FAILURE_EXEC);
+      process::exit(consts::E_CODE_FAILURE_EXEC);
     }
   })
 }

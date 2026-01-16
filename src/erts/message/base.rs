@@ -3,17 +3,11 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
 
-use crate::lang::Exit;
-use crate::lang::ExternalDest;
-use crate::lang::InternalPid;
-use crate::lang::MonitorRef;
-use crate::lang::Term;
+use crate::core::Term;
+use crate::erts::DownMessage;
+use crate::erts::ExitMessage;
 
 pub type DynMessage = Message<Term>;
-
-// -----------------------------------------------------------------------------
-// Message
-// -----------------------------------------------------------------------------
 
 /// A converted process message.
 #[derive(Clone)]
@@ -160,80 +154,6 @@ where
     } else {
       Err(other)
     }
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Exit Message
-// -----------------------------------------------------------------------------
-
-/// A message representing a trapped EXIT signal.
-#[derive(Clone, Debug)]
-#[repr(C)]
-pub struct ExitMessage {
-  from: InternalPid,
-  exit: Exit,
-}
-
-impl ExitMessage {
-  /// Creates a new `ExitMessage`.
-  #[inline]
-  pub(crate) fn new(from: InternalPid, exit: Exit) -> Self {
-    Self {
-      from: from.into(),
-      exit,
-    }
-  }
-
-  /// Returns a reference to the EXIT signal sender.
-  #[inline]
-  pub const fn from(&self) -> InternalPid {
-    self.from
-  }
-
-  /// Returns the EXIT signal exit reason.
-  #[inline]
-  pub const fn exit(&self) -> &Exit {
-    &self.exit
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Down Message
-// -----------------------------------------------------------------------------
-
-/// A message representing a monitor DOWN signal.
-#[derive(Clone, Debug)]
-#[repr(C)]
-pub struct DownMessage {
-  mref: MonitorRef,
-  item: ExternalDest,
-  info: Exit,
-}
-
-impl DownMessage {
-  /// Creates a new `DownMessage`.
-  #[inline]
-  pub(crate) fn new(mref: MonitorRef, item: ExternalDest, info: Exit) -> Self {
-    Self { mref, item, info }
-  }
-
-  /// Returns a reference to the monitored reference.
-  #[inline]
-  pub const fn mref(&self) -> &MonitorRef {
-    &self.mref
-  }
-
-  /// Returns a reference to the monitored item.
-  #[inline]
-  pub const fn item(&self) -> &ExternalDest {
-    &self.item
-  }
-
-  /// Returns the DOWN signal exit reason.
-  #[inline]
-  pub const fn info(&self) -> &Exit {
-    &self.info
   }
 }
 

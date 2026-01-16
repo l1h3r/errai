@@ -4,8 +4,8 @@ use std::fmt::Formatter;
 use std::fmt::Result;
 
 use crate::bifs::translate_pid;
-use crate::lang::ExternalPid;
-use crate::lang::ProcessId;
+use crate::core::ExternalPid;
+use crate::core::ProcessId;
 
 /// An internal process identifier.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]

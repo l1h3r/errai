@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 use std::fmt::Display;
 
-use crate::lang::ExternalPid;
-use crate::lang::InternalPid;
+use crate::core::ExternalPid;
+use crate::core::InternalPid;
 
 mod private {
   pub trait Sealed {}

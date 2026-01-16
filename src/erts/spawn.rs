@@ -1,6 +1,7 @@
-use crate::erts::Runtime;
-use crate::lang::InternalPid;
-use crate::lang::MonitorRef;
+use crate::consts::SPAWN_INIT_ASYNC_DIST;
+use crate::consts::SPAWN_INIT_TRAP_EXIT;
+use crate::core::InternalPid;
+use crate::core::MonitorRef;
 
 // -----------------------------------------------------------------------------
 // Spawn Config
@@ -37,8 +38,8 @@ impl SpawnConfig {
     Self {
       link: false,
       monitor: false,
-      async_dist: Runtime::SPAWN_INIT_ASYNC_DIST,
-      trap_exit: Runtime::SPAWN_INIT_TRAP_EXIT,
+      async_dist: SPAWN_INIT_ASYNC_DIST,
+      trap_exit: SPAWN_INIT_TRAP_EXIT,
     }
   }
 

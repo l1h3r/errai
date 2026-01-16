@@ -4,19 +4,19 @@ use tracing::Span;
 use tracing::span;
 
 use crate::bifs;
-use crate::core::ProcInternal;
-use crate::core::ProcLink;
-use crate::core::ProcMonitor;
-use crate::core::ProcReadOnly;
-use crate::core::ProcessFlags;
+use crate::core::Atom;
+use crate::core::Exit;
+use crate::core::ExternalDest;
+use crate::core::InternalPid;
+use crate::core::MonitorRef;
 use crate::erts::DownMessage;
 use crate::erts::DynMessage;
 use crate::erts::ExitMessage;
-use crate::lang::Atom;
-use crate::lang::Exit;
-use crate::lang::ExternalDest;
-use crate::lang::InternalPid;
-use crate::lang::MonitorRef;
+use crate::erts::ProcessFlags;
+use crate::proc::ProcInternal;
+use crate::proc::ProcLink;
+use crate::proc::ProcMonitor;
+use crate::proc::ProcReadOnly;
 
 // -----------------------------------------------------------------------------
 // Signal Emit

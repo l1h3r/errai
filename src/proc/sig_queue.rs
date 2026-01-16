@@ -8,14 +8,14 @@ use tokio::sync::mpsc::WeakUnboundedSender;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::task;
 
-use crate::core::ProcTask;
+use crate::consts::CAP_PROC_MSG_BUFFER;
+use crate::core::InternalPid;
 use crate::core::raise;
 use crate::erts::DynMessage;
 use crate::erts::Message;
 use crate::erts::Process;
-use crate::erts::Runtime;
 use crate::erts::Signal;
-use crate::lang::InternalPid;
+use crate::proc::ProcTask;
 
 // -----------------------------------------------------------------------------
 // Proc Mail
@@ -30,7 +30,7 @@ impl ProcMail {
   #[inline]
   pub(crate) fn new() -> Self {
     Self {
-      inner: Vec::with_capacity(Runtime::CAP_PROC_MSG_BUFFER),
+      inner: Vec::with_capacity(CAP_PROC_MSG_BUFFER),
     }
   }
 

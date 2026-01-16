@@ -9,7 +9,8 @@ use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
 use std::slice::SliceIndex;
 
-use crate::erts::Runtime;
+use crate::consts::MAX_ATOM_CHARS;
+use crate::consts::MAX_ATOM_COUNT;
 
 #[derive(Debug)]
 pub(crate) enum AtomTableError {
@@ -62,7 +63,7 @@ impl AtomTable {
 
     let mut guard: RwLockWriteGuard<'_, Table> = RwLockUpgradableReadGuard::upgrade(guard);
 
-    if data.chars().count() > Runtime::MAX_ATOM_CHARS {
+    if data.chars().count() > MAX_ATOM_CHARS {
       return Err(AtomTableError::AtomTooLarge);
     }
 
@@ -70,7 +71,7 @@ impl AtomTable {
     let len: usize = guard.len();
 
     if len >= cap {
-      if len >= Runtime::MAX_ATOM_COUNT {
+      if len >= MAX_ATOM_COUNT {
         return Err(AtomTableError::TooManyAtoms);
       }
 
@@ -80,8 +81,8 @@ impl AtomTable {
     debug_assert!(guard.arr.len() == (len >> Block::BITS) + 1);
     debug_assert!(Block::SIZE > (len & Block::MASK));
 
-    // SAFETY: The total number of blocks is determined by `Runtime::MAX_ATOM_COUNT`
-    //         and this is checked above to ensure we never hand out an index beyond
+    // SAFETY: The total number of blocks is determined by `MAX_ATOM_COUNT` and
+    //         this is checked above to ensure we never hand out an index beyond
     //         our maximum capacity. We also split the index in two parts:
     //         - The top bits determine the block index (ie. `index >> Block::BITS`)
     //         - The bottom bits determine the local block slot (`len & Block::MASK`)
@@ -124,7 +125,7 @@ struct Table {
 }
 
 impl Table {
-  const BLOCKS: usize = Runtime::MAX_ATOM_COUNT
+  const BLOCKS: usize = MAX_ATOM_COUNT
     .strict_add(Block::SIZE)
     .strict_sub(1)
     .strict_div(Block::SIZE);

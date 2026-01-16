@@ -16,47 +16,47 @@ use tracing::Span;
 use tracing::span;
 use triomphe::Arc;
 
-use crate::core::CatchUnwind;
-use crate::core::ProcData;
-use crate::core::ProcExternal;
-use crate::core::ProcInternal;
-use crate::core::ProcLink;
-use crate::core::ProcMail;
-use crate::core::ProcMonitor;
-use crate::core::ProcReadOnly;
-use crate::core::ProcRecv;
-use crate::core::ProcSend;
-use crate::core::ProcTask;
-use crate::core::ProcessFlags;
-use crate::core::ProcessInfo;
+use crate::consts;
+use crate::core::Atom;
+use crate::core::Exit;
+use crate::core::ExternalDest;
+use crate::core::InternalDest;
+use crate::core::InternalPid;
+use crate::core::MonitorRef;
+use crate::core::ProcessId;
+use crate::core::ProcTable;
+use crate::core::Term;
+use crate::core::TimerRef;
 use crate::core::raise;
-use crate::core::unbounded_channel;
 use crate::erts::DynMessage;
 use crate::erts::Message;
-use crate::erts::ProcTable;
 use crate::erts::Process;
-use crate::erts::Runtime;
+use crate::erts::ProcessFlags;
+use crate::erts::ProcessInfo;
 use crate::erts::Signal;
 use crate::erts::SignalRecv;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
-use crate::lang::Atom;
-use crate::lang::Exit;
-use crate::lang::ExternalDest;
-use crate::lang::InternalDest;
-use crate::lang::InternalPid;
-use crate::lang::MonitorRef;
-use crate::lang::ProcessId;
-use crate::lang::Term;
-use crate::lang::TimerRef;
+use crate::proc::ProcData;
+use crate::proc::ProcExternal;
+use crate::proc::ProcInternal;
+use crate::proc::ProcLink;
+use crate::proc::ProcMail;
+use crate::proc::ProcMonitor;
+use crate::proc::ProcReadOnly;
+use crate::proc::ProcRecv;
+use crate::proc::ProcSend;
+use crate::proc::ProcTask;
+use crate::proc::unbounded_channel;
+use crate::utils::CatchUnwind;
 
 // A table mapping internal process identifiers to process data.
 static REGISTERED_PROCS: LazyLock<ProcTable<ProcData>> =
-  LazyLock::new(|| ProcTable::with_capacity(Runtime::CAP_REGISTERED_PROCS));
+  LazyLock::new(|| ProcTable::with_capacity(consts::CAP_REGISTERED_PROCS));
 
 // A table mapping registered names to internal process identifiers.
 static REGISTERED_NAMES: LazyLock<RwLock<HashMap<Atom, InternalPid>>> =
-  LazyLock::new(|| RwLock::new(HashMap::with_capacity(Runtime::CAP_REGISTERED_NAMES)));
+  LazyLock::new(|| RwLock::new(HashMap::with_capacity(consts::CAP_REGISTERED_NAMES)));
 
 // -----------------------------------------------------------------------------
 // General
