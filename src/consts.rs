@@ -24,6 +24,11 @@ pub const E_CODE_FAILURE_EXEC: i32 = -2;
 /// [`Atom`]: crate::core::Atom
 pub const MAX_ATOM_CHARS: usize = 255;
 
+/// Maximum number of bytes in an [`Atom`].
+///
+/// [`Atom`]: crate::core::Atom
+pub const MAX_ATOM_BYTES: usize = MAX_ATOM_CHARS.strict_mul(4);
+
 /// Maximum number of [`Atom`]s in the atom table.
 ///
 /// [`Atom`]: crate::core::Atom

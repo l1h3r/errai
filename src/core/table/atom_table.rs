@@ -1,3 +1,4 @@
+use hashbrown::DefaultHashBuilder;
 use hashbrown::HashMap;
 use parking_lot::RwLock;
 use parking_lot::RwLockReadGuard;
@@ -7,9 +8,10 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
+use std::hash::BuildHasher;
 use std::slice::SliceIndex;
 
-use crate::consts::MAX_ATOM_CHARS;
+use crate::consts::MAX_ATOM_BYTES;
 use crate::consts::MAX_ATOM_COUNT;
 
 #[derive(Debug)]
@@ -18,6 +20,21 @@ pub(crate) enum AtomTableError {
   TooManyAtoms,
 }
 
+/// Atom interning table.
+///
+/// # Memory behavior
+///
+/// Atoms are interned permanently and are **never deallocated** for the
+/// lifetime of the runtime.
+///
+/// To mitigate unbounded growth, the table enforces the following limits:
+///
+/// - `MAX_ATOM_COUNT`: maximum number of distinct atoms
+/// - `MAX_ATOM_BYTES`: maximum UTF-8 byte length per atom
+///
+/// These limits provide operational safety but do **not** make atom creation
+/// reversible. Creating atoms dynamically from untrusted input may still lead
+/// to memory exhaustion and should be avoided.
 #[repr(transparent)]
 pub(crate) struct AtomTable {
   inner: RwLock<Table>,
@@ -47,14 +64,16 @@ impl AtomTable {
   }
 
   pub(crate) fn set(&self, data: &str) -> Result<u32, AtomTableError> {
+    let hash: u64 = DefaultHashBuilder::default().hash_one(data);
+
     // -------------------------------------------------------------------------
     // 1. Fast Path - Existing Atom
     // -------------------------------------------------------------------------
 
     let guard: RwLockUpgradableReadGuard<'_, Table> = self.inner.upgradable_read();
 
-    if let Some(index) = guard.map.get(data).copied() {
-      return Ok(index);
+    if let Some((_, index)) = guard.map.raw_entry().from_key_hashed_nocheck(hash, data) {
+      return Ok(*index);
     }
 
     // -------------------------------------------------------------------------
@@ -63,7 +82,7 @@ impl AtomTable {
 
     let mut guard: RwLockWriteGuard<'_, Table> = RwLockUpgradableReadGuard::upgrade(guard);
 
-    if data.chars().count() > MAX_ATOM_CHARS {
+    if data.len() > MAX_ATOM_BYTES {
       return Err(AtomTableError::AtomTooLarge);
     }
 
@@ -81,18 +100,24 @@ impl AtomTable {
     debug_assert!(guard.arr.len() == (len >> Block::BITS) + 1);
     debug_assert!(Block::SIZE > (len & Block::MASK));
 
-    // SAFETY: The total number of blocks is determined by `MAX_ATOM_COUNT` and
-    //         this is checked above to ensure we never hand out an index beyond
-    //         our maximum capacity. We also split the index in two parts:
-    //         - The top bits determine the block index (ie. `index >> Block::BITS`)
-    //         - The bottom bits determine the local block slot (`len & Block::MASK`)
-    //         These simple invariants ensure we are accessing an in-bounds index.
+    // SAFETY:
+    //
+    // - `len` is the total number of interned atoms and is always <= MAX_ATOM_COUNT.
+    // - Blocks are append-only and sized to cover all indices < `len`.
+    // - The block index (`len >> Block::BITS`) and slot index (`len & Block::MASK`)
+    //   therefore always refer to a valid, in-bounds location.
     let block: &mut Block = unsafe { guard.arr.get_unchecked_mut(len >> Block::BITS) };
     let slot: &mut &'static str = unsafe { block.get_unchecked_mut(len & Block::MASK) };
     let term: &'static str = Box::leak(Box::from(data));
 
     *slot = term;
-    guard.map.insert(term, len as u32);
+
+    guard
+      .map
+      .raw_entry_mut()
+      .from_key_hashed_nocheck(hash, data)
+      .insert(term, len as u32);
+
     guard.len += 1;
 
     drop(guard);
@@ -119,7 +144,7 @@ impl Debug for AtomTable {
 
 #[repr(C)]
 struct Table {
-  map: HashMap<&'static str, u32>,
+  map: HashMap<&'static str, u32, DefaultHashBuilder>,
   arr: Vec<Block>,
   len: usize,
 }
@@ -132,11 +157,14 @@ impl Table {
 
   #[inline]
   fn new() -> Self {
-    Self {
+    let mut this: Self = Self {
       map: HashMap::with_capacity(Block::SIZE),
       arr: Vec::with_capacity(Self::BLOCKS),
       len: 0,
-    }
+    };
+
+    this.arr.push(Block::new());
+    this
   }
 
   #[inline]
