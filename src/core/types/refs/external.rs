@@ -41,8 +41,11 @@ impl Debug for ExternalRef {
 }
 
 impl Display for ExternalRef {
-  fn fmt(&self, _f: &mut Formatter<'_>) -> Result {
-    todo!()
+  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    let node: u32 = self.node.into_slot();
+    let bits: [u32; 3] = self.bits.into_bits();
+
+    write!(f, "#Ref<{}.{}.{}.{}>", node, bits[2], bits[1], bits[0])
   }
 }
 
