@@ -1,12 +1,13 @@
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
+use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::WeakUnboundedSender;
 use tokio::sync::mpsc::error::TryRecvError;
-use tokio::task;
+use triomphe::Arc;
 
 use crate::consts::CAP_PROC_MSG_BUFFER;
 use crate::core::InternalPid;
@@ -21,34 +22,42 @@ use crate::proc::ProcTask;
 // Proc Mail
 // -----------------------------------------------------------------------------
 
-#[repr(transparent)]
+#[repr(C)]
 pub(crate) struct ProcMail {
-  inner: Vec<DynMessage>,
+  mqueue: Vec<DynMessage>,
+  notify: Arc<Notify>,
 }
 
 impl ProcMail {
   #[inline]
   pub(crate) fn new() -> Self {
     Self {
-      inner: Vec::with_capacity(CAP_PROC_MSG_BUFFER),
+      mqueue: Vec::with_capacity(CAP_PROC_MSG_BUFFER),
+      notify: Arc::new(Notify::new()),
     }
   }
 
   #[inline]
   pub(crate) fn push(&mut self, message: DynMessage) {
-    self.inner.push(message);
+    self.mqueue.push(message);
+    self.notify.notify_one();
   }
 
   #[inline]
-  pub(crate) fn poll<F>(&mut self, filter: F) -> Option<DynMessage>
+  pub(crate) fn poll<F>(&mut self, filter: F, marker: &mut usize) -> Option<DynMessage>
   where
     F: Fn(&DynMessage) -> bool,
   {
-    self
-      .inner
-      .iter()
-      .position(filter)
-      .map(|index| self.inner.remove(index))
+    for index in (*marker)..self.mqueue.len() {
+      if filter(&self.mqueue[index]) {
+        *marker = 0;
+        return Some(self.mqueue.remove(index));
+      }
+    }
+
+    *marker = self.mqueue.len();
+
+    None
   }
 
   // ---------------------------------------------------------------------------
@@ -89,21 +98,21 @@ impl ProcMail {
   where
     F: Fn(&DynMessage) -> bool,
   {
-    let poll = |this: &ProcTask| -> Option<DynMessage> {
+    let mut marker: usize = 0;
+
+    let mut poll = |this: &ProcTask| -> Option<DynMessage> {
       debug_assert_eq!(this.readonly.mpid, pid);
-      this.internal.lock().inbox.poll(&filter)
+      this.internal.lock().inbox.poll(&filter, &mut marker)
     };
 
-    if let Some(message) = Process::with(poll) {
-      return message;
-    }
-
     'poll: loop {
-      task::yield_now().await;
-
-      if let Some(message) = Process::with(poll) {
+      if let Some(message) = Process::with(&mut poll) {
         break 'poll message;
       }
+
+      Process::with(|this| Arc::clone(&this.internal.lock().inbox.notify))
+        .notified()
+        .await;
     }
   }
 }
@@ -111,7 +120,7 @@ impl ProcMail {
 impl Debug for ProcMail {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     f.write_str("ProcMail ")?;
-    f.debug_list().entries(self.inner.iter()).finish()
+    f.debug_list().entries(self.mqueue.iter()).finish()
   }
 }
 
