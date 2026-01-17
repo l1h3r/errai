@@ -23,8 +23,8 @@ use crate::core::ExternalDest;
 use crate::core::InternalDest;
 use crate::core::InternalPid;
 use crate::core::MonitorRef;
-use crate::core::ProcessId;
 use crate::core::ProcTable;
+use crate::core::ProcessId;
 use crate::core::Term;
 use crate::core::TimerRef;
 use crate::core::raise;
@@ -406,9 +406,9 @@ pub(crate) fn process_register(this: &ProcTask, pid: InternalPid, name: Atom) {
     raise!(Error, BadArg, "reserved name");
   }
 
-  let mut names: RwLockWriteGuard<'_, HashMap<Atom, InternalPid>> = REGISTERED_NAMES.write();
+  let mut name_guard: RwLockWriteGuard<'_, HashMap<Atom, InternalPid>> = REGISTERED_NAMES.write();
 
-  let Entry::Vacant(name_entry) = names.entry(name) else {
+  let Entry::Vacant(name_entry) = name_guard.entry(name) else {
     raise!(Error, BadArg, "registered name");
   };
 
@@ -417,44 +417,48 @@ pub(crate) fn process_register(this: &ProcTask, pid: InternalPid, name: Atom) {
       raise!(Error, BadArg, "not alive");
     };
 
-    let mut guard: RwLockWriteGuard<'_, ProcExternal> = proc.external.write();
+    let mut proc_guard: RwLockWriteGuard<'_, ProcExternal> = proc.external.write();
 
-    if guard.name.is_some() {
+    if proc_guard.name.is_none() {
+      proc_guard.name = Some(name);
+      name_entry.insert(proc.readonly.mpid);
+    } else {
       raise!(Error, BadArg, "registered PID");
     }
 
-    guard.name = Some(name);
-    name_entry.insert(pid);
-
-    drop(guard);
+    drop(proc_guard);
   });
 
-  drop(names);
+  drop(name_guard);
 }
 
 // BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2309
 pub(crate) fn process_unregister(this: &ProcTask, name: Atom) {
-  let mut names: RwLockWriteGuard<'_, HashMap<Atom, InternalPid>> = REGISTERED_NAMES.write();
+  let mut name_guard: RwLockWriteGuard<'_, HashMap<Atom, InternalPid>> = REGISTERED_NAMES.write();
 
-  let Entry::Occupied(entry) = names.entry(name) else {
-    raise!(Error, BadArg, "not a registered name");
+  let Entry::Occupied(name_entry) = name_guard.entry(name) else {
+    raise!(Error, BadArg, "unregistered name");
   };
 
-  process_with(this, *entry.get(), |proc| {
+  process_with(this, *name_entry.get(), |proc| {
     let Some(proc) = proc else {
-      entry.remove();
+      name_entry.remove();
       return; // Ignore, the PID was just terminated
     };
 
-    let mut guard: RwLockWriteGuard<'_, ProcExternal> = proc.external.write();
+    let mut proc_guard: RwLockWriteGuard<'_, ProcExternal> = proc.external.write();
 
-    guard.name = None;
-    entry.remove();
+    if proc_guard.name.is_some() {
+      proc_guard.name = None;
+      name_entry.remove();
+    } else {
+      raise!(Error, BadArg, "unregistered PID");
+    }
 
-    drop(guard);
+    drop(proc_guard);
   });
 
-  drop(names);
+  drop(name_guard);
 }
 
 // BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2327
@@ -542,20 +546,24 @@ pub(crate) fn process_delete(this: &mut ProcTask) {
   let mut internal: MutexGuard<'_, ProcInternal> = this.internal.lock();
   let mut external: RwLockWriteGuard<'_, ProcExternal> = this.external.write();
 
+  let name: Option<Atom> = external.name.clone();
+
   let exit: Exit = match external.exit.take() {
     Some(data) => data,
     None => Exit::Atom(Atom::new("panic")),
   };
 
-  tracing::trace!(?exit, "(2) - Unregister");
+  drop(external);
 
-  if let Some(name) = external.name.take().as_ref() {
-    if let None = REGISTERED_NAMES.write().remove(name) {
+  tracing::trace!("(2) - Unregister Name");
+
+  if let Some(name) = name {
+    if let None = REGISTERED_NAMES.write().remove(&name) {
       tracing::error!(%name, "dangling name");
     }
   }
 
-  tracing::trace!("(3) - Links");
+  tracing::trace!("(3) - Send Link `EXIT`");
 
   for (pid, state) in internal.links.drain() {
     if state.is_disabled() {
@@ -569,7 +577,7 @@ pub(crate) fn process_delete(this: &mut ProcTask) {
     }
   }
 
-  tracing::trace!("(4) - Monitors");
+  tracing::trace!("(4) - Send Monitor `DOWN`");
 
   for (mref, state) in internal.monitor_recv.drain() {
     if let Some(proc) = process_find(state.origin()) {
@@ -588,7 +596,6 @@ pub(crate) fn process_delete(this: &mut ProcTask) {
   tracing::trace!("(6) - Unlock");
 
   drop(internal);
-  drop(external);
 
   drop(span_guard);
 }

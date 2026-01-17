@@ -1,3 +1,10 @@
+// Signal Handling
+//
+// # Erlang References
+//
+// <https://www.erlang.org/doc/system/ref_man_processes#sending-exit-signals>
+// <https://www.erlang.org/doc/system/ref_man_processes#receiving-exit-signals>
+// <https://www.erlang.org/doc/apps/erts/erl_dist_protocol#link_protocol>
 use hashbrown::hash_map::Entry;
 use std::num::NonZeroU64;
 use tracing::Span;

@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
-use crate::bifs::translate_pid;
+use crate::bifs;
 use crate::core::ExternalPid;
 use crate::core::ProcessId;
 
@@ -52,7 +52,7 @@ impl Display for InternalPid {
     //
     // Note: We need access to the readonly data of the process table to
     //       understand the bit transformations required to format the PID.
-    if let Some((number, serial)) = translate_pid(*self) {
+    if let Some((number, serial)) = bifs::translate_pid(*self) {
       write!(f, "#PID<0.{}.{}>", number, serial)
     } else {
       write!(f, "#PID<0.x.x>")

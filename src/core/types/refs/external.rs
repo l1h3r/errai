@@ -10,21 +10,21 @@ use crate::core::InternalRef;
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]
 pub struct ExternalRef {
-  iref: InternalRef,
+  bits: InternalRef,
   node: Atom,
 }
 
 impl ExternalRef {
   /// Creates a new `ExternalRef`.
   #[inline]
-  pub const fn new(iref: InternalRef, node: Atom) -> Self {
-    Self { iref, node }
+  pub const fn new(bits: InternalRef, node: Atom) -> Self {
+    Self { bits, node }
   }
 
-  /// Returns the raw reference iref.
+  /// Returns the raw reference bits.
   #[inline]
-  pub const fn iref(&self) -> InternalRef {
-    self.iref
+  pub const fn bits(&self) -> InternalRef {
+    self.bits
   }
 
   /// Returns the name of the node that spawned this reference.
