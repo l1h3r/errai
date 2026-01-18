@@ -24,7 +24,7 @@ use crate::proc::ProcTask;
 use crate::raise;
 
 // -----------------------------------------------------------------------------
-// @data - Task Globals
+// Task Globals
 // -----------------------------------------------------------------------------
 
 tokio::task_local! {
@@ -32,7 +32,7 @@ tokio::task_local! {
 }
 
 // -----------------------------------------------------------------------------
-// @type - Process Info
+// Process Info
 // -----------------------------------------------------------------------------
 
 /// Information about a process.
@@ -40,7 +40,7 @@ tokio::task_local! {
 pub struct ProcessInfo {}
 
 // -----------------------------------------------------------------------------
-// @type - Process Flags
+// Process Flags
 //
 // Somewhat copied from:
 //   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process.h#L1632
@@ -55,116 +55,18 @@ bitflags! {
 }
 
 // -----------------------------------------------------------------------------
-// @api - Process
+// Process
 // -----------------------------------------------------------------------------
 
-/// Errai process API.
+/// Process API for spawning, messaging, and process coordination.
+///
+/// All methods are static and operate on the calling
+/// process or a specified target processes.
 pub struct Process;
 
 impl Process {
-  /// Sets the task-local process context.
-  #[inline]
-  pub(crate) fn scope<F>(task: ProcTask, future: F) -> TaskLocalFuture<ProcTask, F>
-  where
-    F: Future,
-  {
-    CONTEXT.scope(task, future)
-  }
-
-  /// Accesses the current task-local process context and runs the given function.
-  #[inline]
-  pub(crate) fn with<F, R>(f: F) -> R
-  where
-    F: FnOnce(&ProcTask) -> R,
-  {
-    match CONTEXT.try_with(f) {
-      Ok(result) => result,
-      Err(error) => raise!(Error, SysInv, error),
-    }
-  }
-
   // ---------------------------------------------------------------------------
-  // General API
-  // ---------------------------------------------------------------------------
-
-  /// Returns the process identifier of the calling process.
-  ///
-  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#self/0>
-  pub fn this() -> InternalPid {
-    Self::with(|this| this.readonly.mpid)
-  }
-
-  /// Returns a list of process identifiers corresponding to all the
-  /// processes currently existing on the local node.
-  ///
-  /// Notice that an exiting process exists, but is not alive. That is,
-  /// [`Process::alive`] returns false for an exiting process, but its process
-  /// identifier is part of the result returned from [`Process::list`].
-  ///
-  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#processes/0>
-  pub fn list() -> Vec<InternalPid> {
-    bifs::process_list()
-  }
-
-  /// Sleeps the current process for the given `timeout`.
-  ///
-  /// REF: **N/A**
-  pub async fn sleep(timeout: Duration) {
-    time::sleep(timeout).await
-  }
-
-  /// Yields execution back to the runtime.
-  ///
-  /// REF: **N/A**
-  pub async fn yield_now() {
-    task::yield_now().await;
-  }
-
-  /// Sends an exit signal with the given `reason` to `pid`.
-  ///
-  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#exit/2>
-  pub fn exit(pid: impl ProcessId, reason: impl Into<Exit>) {
-    Self::with(|this| bifs::process_exit(this, pid, reason.into()))
-  }
-
-  /// Returns `true` if the process exists and is alive, that is, is not exiting
-  /// and has not exited. Otherwise returns `false`.
-  pub fn alive(pid: InternalPid) -> bool {
-    Self::with(|this| bifs::process_alive(this, pid))
-  }
-
-  /// Returns the process flags of the calling process.
-  ///
-  /// REF: **N/A**
-  pub fn get_flags() -> ProcessFlags {
-    Self::with(bifs::process_get_flags)
-  }
-
-  /// Sets the process flags of the calling process.
-  ///
-  /// REF: **N/A**
-  pub fn set_flags(flags: ProcessFlags) {
-    Self::with(|this| bifs::process_set_flags(this, flags))
-  }
-
-  /// Sets the process flag indicated to the specified value.
-  ///
-  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_flag/2>
-  pub fn set_flag(flag: ProcessFlags, value: bool) {
-    Self::with(|this| bifs::process_set_flag(this, flag, value))
-  }
-
-  /// Returns information about the process identified by `pid`.
-  ///
-  /// Returns `None` if the process is not alive.
-  ///
-  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_info/1>
-  pub fn info(pid: InternalPid) -> Option<ProcessInfo> {
-    Self::with(|this| bifs::process_info(this, pid))
-  }
-
-  // ---------------------------------------------------------------------------
-  // General API - Spawning & Messaging
+  // Process Lifecycle
   // ---------------------------------------------------------------------------
 
   /// Spawns a new process to handle `future`.
@@ -225,6 +127,17 @@ impl Process {
     Self::with(|this| bifs::process_spawn(this, opts, future))
   }
 
+  /// Sends an exit signal with the given `reason` to `pid`.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#exit/2>
+  pub fn exit(pid: impl ProcessId, reason: impl Into<Exit>) {
+    Self::with(|this| bifs::process_exit(this, pid, reason.into()))
+  }
+
+  // ---------------------------------------------------------------------------
+  // Messaging
+  // ---------------------------------------------------------------------------
+
   /// Sends `message` to the given `destination`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#send/2>
@@ -271,7 +184,7 @@ impl Process {
   }
 
   // ---------------------------------------------------------------------------
-  // General API - Links, Monitors, Aliases
+  // Links
   // ---------------------------------------------------------------------------
 
   /// Creates a link between the calling process and the given `pid`.
@@ -296,6 +209,10 @@ impl Process {
   pub fn unlink(pid: impl ProcessId) {
     Self::with(|this| bifs::process_unlink(this, pid))
   }
+
+  // ---------------------------------------------------------------------------
+  // Monitors
+  // ---------------------------------------------------------------------------
 
   /// Starts monitoring the given `item` from the calling process.
   ///
@@ -331,6 +248,10 @@ impl Process {
     Self::with(|this| bifs::process_demonitor(this, reference))
   }
 
+  // ---------------------------------------------------------------------------
+  // Aliases
+  // ---------------------------------------------------------------------------
+
   /// Creates a process alias.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#alias/0>
@@ -349,17 +270,17 @@ impl Process {
   }
 
   // ---------------------------------------------------------------------------
-  // General API - Timers
+  // Timers
   // ---------------------------------------------------------------------------
 
-  /// Sends `message` to given `destination` after `time` delay.
+  /// Sends `term` to given destination after `time` delay.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#send_after/3>
   pub fn send_after<T>(dest: impl Into<InternalDest>, term: T, time: Duration) -> TimerRef
   where
     T: Send + 'static,
   {
-    Self::with(|this| bifs::process_timer_create(this, dest.into(), term, time))
+    todo!()
   }
 
   /// Cancels a timer returned by [`Process::send_after`].
@@ -371,8 +292,24 @@ impl Process {
   /// not tell you if the timeout message has arrived at its destination yet.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#cancel_timer/1>
-  pub fn cancel_timer(timer: TimerRef, non_blocking: bool) -> Option<Duration> {
-    bifs::process_timer_stop(timer, non_blocking)
+  pub async fn cancel_timer(timer: TimerRef) -> Option<Duration> {
+    todo!()
+  }
+
+  /// Cancels a timer returned by [`Process::send_after`].
+  ///
+  /// Unlike [`Process::cancel_timer`], this function returns immediately after
+  /// sending a request for cancellation to the timer service. A [`message`] is
+  /// sent to the caller when the cancellation operation has been performed.
+  ///
+  /// Even if the timer had expired and the message was sent, this function does
+  /// not tell you if the timeout message has arrived at its destination yet.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#cancel_timer/1>
+  ///
+  /// [`message`]: todo!()
+  pub fn cancel_timer_non_blocking(timer: TimerRef) {
+    todo!()
   }
 
   /// Reads a timer created by [`Process::send_after`].
@@ -384,12 +321,84 @@ impl Process {
   /// not tell you if the timeout message has arrived at its destination yet.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#read_timer/1>
-  pub fn read_timer(timer: TimerRef, non_blocking: bool) -> Option<Duration> {
-    bifs::process_timer_read(timer, non_blocking)
+  pub async fn read_timer(timer: TimerRef) -> Option<Duration> {
+    todo!()
+  }
+
+  /// Reads a timer created by [`Process::send_after`].
+  ///
+  /// Unlike [`Process::read_timer`], this function returns immediately after
+  /// sending a request for information to the timer service. A [`message`] is
+  /// sent to the caller when the information is available.
+  ///
+  /// Even if the timer had expired and the message was sent, this function does
+  /// not tell you if the timeout message has arrived at its destination yet.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#read_timer/1>
+  ///
+  /// [`message`]: todo!()
+  pub fn read_timer_non_blocking(timer: TimerRef) {
+    todo!()
   }
 
   // ---------------------------------------------------------------------------
-  // General API - Local Name Registration
+  // Process Introspection
+  // ---------------------------------------------------------------------------
+
+  /// Returns the process identifier of the calling process.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#self/0>
+  pub fn this() -> InternalPid {
+    Self::with(|this| this.readonly.mpid)
+  }
+
+  /// Returns a list of process identifiers corresponding to all the
+  /// processes currently existing on the local node.
+  ///
+  /// Notice that an exiting process exists, but is not alive. That is,
+  /// [`Process::alive`] returns false for an exiting process, but its process
+  /// identifier is part of the result returned from [`Process::list`].
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#processes/0>
+  pub fn list() -> Vec<InternalPid> {
+    bifs::process_list()
+  }
+
+  /// Returns `true` if the process exists and is alive, that is, is not exiting
+  /// and has not exited. Otherwise returns `false`.
+  pub fn alive(pid: InternalPid) -> bool {
+    Self::with(|this| bifs::process_alive(this, pid))
+  }
+
+  /// Returns information about the process identified by `pid`.
+  ///
+  /// Returns `None` if the process is not alive.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_info/1>
+  pub fn info(pid: InternalPid) -> Option<ProcessInfo> {
+    Self::with(|this| bifs::process_info(this, pid))
+  }
+
+  // ---------------------------------------------------------------------------
+  // Process Utilities
+  // ---------------------------------------------------------------------------
+
+  /// Sleeps the current process for the given `timeout`.
+  ///
+  /// REF: **N/A**
+  pub async fn sleep(timeout: Duration) {
+    time::sleep(timeout).await
+  }
+
+  /// Yields execution back to the runtime.
+  ///
+  /// REF: **N/A**
+  pub async fn yield_now() {
+    task::yield_now().await;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Name Registration
   // ---------------------------------------------------------------------------
 
   /// Registers the given `pid` under the given `name` on the local node.
@@ -437,7 +446,32 @@ impl Process {
   }
 
   // ---------------------------------------------------------------------------
-  // General API - Process Dictionary
+  // Process Flags
+  // ---------------------------------------------------------------------------
+
+  /// Returns the process flags of the calling process.
+  ///
+  /// REF: **N/A**
+  pub fn get_flags() -> ProcessFlags {
+    Self::with(bifs::process_get_flags)
+  }
+
+  /// Sets the process flags of the calling process.
+  ///
+  /// REF: **N/A**
+  pub fn set_flags(flags: ProcessFlags) {
+    Self::with(|this| bifs::process_set_flags(this, flags))
+  }
+
+  /// Sets the process flag indicated to the specified value.
+  ///
+  /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_flag/2>
+  pub fn set_flag(flag: ProcessFlags, value: bool) {
+    Self::with(|this| bifs::process_set_flag(this, flag, value))
+  }
+
+  // ---------------------------------------------------------------------------
+  // Process Dictionary
   // ---------------------------------------------------------------------------
 
   /// Stores the given `key`-`value` pair in the process dictionary.
@@ -494,5 +528,30 @@ impl Process {
   /// REF: **N/A**
   pub fn values() -> Vec<Term> {
     Self::with(bifs::process_dict_values)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Task-Local Context
+  // ---------------------------------------------------------------------------
+
+  /// Sets the task-local process context.
+  #[inline]
+  pub(crate) fn scope<F>(task: ProcTask, future: F) -> TaskLocalFuture<ProcTask, F>
+  where
+    F: Future,
+  {
+    CONTEXT.scope(task, future)
+  }
+
+  /// Accesses the current task-local process context and runs the given function.
+  #[inline]
+  pub(crate) fn with<F, R>(f: F) -> R
+  where
+    F: FnOnce(&ProcTask) -> R,
+  {
+    match CONTEXT.try_with(f) {
+      Ok(result) => result,
+      Err(error) => raise!(Error, SysInv, error),
+    }
   }
 }
