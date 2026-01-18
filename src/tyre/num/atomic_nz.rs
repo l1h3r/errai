@@ -55,10 +55,21 @@ impl AtomicNzU64 {
   #[inline]
   pub fn fetch_add(&self, value: u64, ordering: Ordering) -> NonZeroU64 {
     'fetch_add: loop {
-      let data: u64 = self.inner.fetch_add(value, ordering);
+      let current: u64 = self.inner.load(Ordering::Relaxed);
+      let updated: u64 = current.wrapping_add(value);
 
-      if let Some(next) = NonZeroU64::new(data) {
-        break 'fetch_add next;
+      // Skip zero by adding 1 more
+      let updated: u64 = if updated == 0 { 1 } else { updated };
+
+      match self
+        .inner
+        .compare_exchange_weak(current, updated, ordering, Ordering::Relaxed)
+      {
+        Ok(prev) => {
+          // SAFETY: We just loaded `current` and verified it's non-zero via invariant
+          break 'fetch_add unsafe { NonZeroU64::new_unchecked(prev) };
+        }
+        Err(_) => continue,
       }
     }
   }
@@ -81,5 +92,33 @@ impl From<NonZeroU64> for AtomicNzU64 {
   #[inline]
   fn from(other: NonZeroU64) -> Self {
     Self::from_nonzero(other)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_fetch_add_wrapping() {
+    let atomic = AtomicNzU64::from_nonzero(NonZeroU64::new(1).unwrap());
+
+    // This should handle wrapping correctly
+    let previous: NonZeroU64 = atomic.fetch_add(u64::MAX, Ordering::Relaxed);
+    assert_eq!(previous.get(), 1);
+
+    // Atomic should never be zero
+    let current: NonZeroU64 = atomic.load(Ordering::Relaxed);
+    assert_ne!(current.get(), 0, "Atomic value wrapped to zero - UB!");
+  }
+
+  #[test]
+  fn test_multiple_wraps() {
+    let atomic = AtomicNzU64::new();
+
+    for _ in 0..1000 {
+      atomic.fetch_add(u64::MAX / 100, Ordering::Relaxed);
+      assert_ne!(atomic.load(Ordering::Relaxed).get(), 0);
+    }
   }
 }
