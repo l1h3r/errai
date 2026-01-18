@@ -1,9 +1,9 @@
-use std::fmt::Debug;
-use std::fmt::Formatter;
-use std::fmt::Result;
-use std::num::NonZeroU64;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
+use core::fmt::Debug;
+use core::fmt::Formatter;
+use core::fmt::Result;
+use core::num::NonZeroU64;
+use core::sync::atomic::AtomicU64;
+use core::sync::atomic::Ordering;
 
 /// A non-zero integer type which can be safely shared between threads.
 #[repr(transparent)]

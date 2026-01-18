@@ -5,12 +5,6 @@ use tokio::task::futures::TaskLocalFuture;
 use tokio::time;
 
 use crate::bifs;
-use crate::proc::ProcTask;
-use crate::core::raise;
-use crate::erts::DynMessage;
-use crate::erts::Message;
-use crate::erts::SpawnConfig;
-use crate::erts::SpawnHandle;
 use crate::core::AliasRef;
 use crate::core::Atom;
 use crate::core::Exit;
@@ -22,6 +16,12 @@ use crate::core::MonitorRef;
 use crate::core::ProcessId;
 use crate::core::Term;
 use crate::core::TimerRef;
+use crate::core::raise;
+use crate::erts::DynMessage;
+use crate::erts::Message;
+use crate::erts::SpawnConfig;
+use crate::erts::SpawnHandle;
+use crate::proc::ProcTask;
 
 // -----------------------------------------------------------------------------
 // @data - Task Globals

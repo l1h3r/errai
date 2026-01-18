@@ -5,7 +5,9 @@ use parking_lot::RwLockReadGuard;
 use parking_lot::RwLockUpgradableReadGuard;
 use parking_lot::RwLockWriteGuard;
 use std::collections::BTreeMap;
+use std::error::Error;
 use std::fmt::Debug;
+use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
 use std::hash::BuildHasher;
@@ -14,11 +16,33 @@ use std::slice::SliceIndex;
 use crate::consts::MAX_ATOM_BYTES;
 use crate::consts::MAX_ATOM_COUNT;
 
+// -----------------------------------------------------------------------------
+// Atom Table Error
+// -----------------------------------------------------------------------------
+
 #[derive(Debug)]
-pub(crate) enum AtomTableError {
+#[non_exhaustive]
+pub enum AtomTableError {
   AtomTooLarge,
   TooManyAtoms,
+  AtomNotFound,
 }
+
+impl Display for AtomTableError {
+  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+    match self {
+      Self::AtomTooLarge => f.write_str("atom too large"),
+      Self::TooManyAtoms => f.write_str("too many atoms"),
+      Self::AtomNotFound => f.write_str("atom not found"),
+    }
+  }
+}
+
+impl Error for AtomTableError {}
+
+// -----------------------------------------------------------------------------
+// Atom Table
+// -----------------------------------------------------------------------------
 
 /// Atom interning table.
 ///
@@ -36,43 +60,42 @@ pub(crate) enum AtomTableError {
 /// reversible. Creating atoms dynamically from untrusted input may still lead
 /// to memory exhaustion and should be avoided.
 #[repr(transparent)]
-pub(crate) struct AtomTable {
+pub struct AtomTable {
   inner: RwLock<Table>,
 }
 
 impl AtomTable {
   #[inline]
-  pub(crate) fn new() -> Self {
+  pub fn new() -> Self {
     Self {
       inner: RwLock::new(Table::new()),
     }
   }
 
-  pub(crate) fn get(&self, slot: u32) -> Option<&str> {
+  pub fn get(&self, slot: u32) -> Result<&str, AtomTableError> {
     let guard: RwLockReadGuard<'_, Table> = self.inner.read();
     let index: usize = slot as usize;
 
     if index >= guard.len {
-      return None;
+      return Err(AtomTableError::AtomNotFound);
     }
 
     // SAFETY: We just ensured the `index` is in bounds.
     let block: &Block = unsafe { guard.arr.get_unchecked(index >> Block::BITS) };
     let value: &'static str = unsafe { block.get_unchecked(index & Block::MASK) };
 
-    Some(value)
+    Ok(value)
   }
 
-  pub(crate) fn set(&self, data: &str) -> Result<u32, AtomTableError> {
-    let hash: u64 = DefaultHashBuilder::default().hash_one(data);
-
+  pub fn set(&self, data: &str) -> Result<u32, AtomTableError> {
     // -------------------------------------------------------------------------
     // 1. Fast Path - Existing Atom
     // -------------------------------------------------------------------------
 
     let guard: RwLockUpgradableReadGuard<'_, Table> = self.inner.upgradable_read();
+    let dhash: u64 = guard.map.hasher().hash_one(data);
 
-    if let Some((_, index)) = guard.map.raw_entry().from_key_hashed_nocheck(hash, data) {
+    if let Some((_, index)) = guard.map.raw_entry().from_key_hashed_nocheck(dhash, data) {
       return Ok(*index);
     }
 
@@ -115,7 +138,7 @@ impl AtomTable {
     guard
       .map
       .raw_entry_mut()
-      .from_key_hashed_nocheck(hash, data)
+      .from_key_hashed_nocheck(dhash, data)
       .insert(term, len as u32);
 
     guard.len += 1;

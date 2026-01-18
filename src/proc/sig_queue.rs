@@ -40,7 +40,7 @@ impl ProcMail {
   #[inline]
   pub(crate) fn push(&mut self, message: DynMessage) {
     self.mqueue.push(message);
-    self.notify.notify_one();
+    self.notify.notify_waiters();
   }
 
   #[inline]

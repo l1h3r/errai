@@ -12,7 +12,6 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 
 use crate::core::AtomTable;
-use crate::core::AtomTableError;
 use crate::core::raise;
 
 // -----------------------------------------------------------------------------
@@ -76,22 +75,16 @@ impl Atom {
   pub fn new(data: &str) -> Self {
     match ATOM_TABLE.set(data) {
       Ok(slot) => Self::from_slot(slot),
-      Err(AtomTableError::AtomTooLarge) => {
-        raise!(Error, SysCap, "atom too large");
-      }
-      Err(AtomTableError::TooManyAtoms) => {
-        raise!(Error, SysCap, "too many atoms");
-      }
+      Err(error) => raise!(Error, SysCap, error),
     }
   }
 
   #[inline]
   pub fn as_str(&self) -> &'static str {
-    let Some(data) = ATOM_TABLE.get(self.slot) else {
-      raise!(Error, SysInv, "atom not found");
-    };
-
-    data
+    match ATOM_TABLE.get(self.slot) {
+      Ok(data) => data,
+      Err(error) => raise!(Error, SysInv, error),
+    }
   }
 }
 

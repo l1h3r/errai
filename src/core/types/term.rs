@@ -36,40 +36,6 @@ impl Term {
     }
   }
 
-  /// Creates a new [`Term`] from a dynamically typed error value.
-  ///
-  /// If the error is a `&str` or [`String`], its message is preserved.
-  /// Otherwise, the error is formatted using [`Debug`] and wrapped in a
-  /// generic `"unknown error (...)"` message.
-  ///
-  /// This is primarily intended for converting opaque error values into a
-  /// displayable [`Term`].
-  #[inline]
-  pub fn new_error(error: Box<dyn Any + Send>) -> Self {
-    match error.downcast::<&str>() {
-      Ok(error) => Self::new(error),
-      Err(error) => match error.downcast::<String>() {
-        Ok(error) => Self::new(error),
-        Err(error) => Self::new(format!("unknown error ({error:?})")),
-      },
-    }
-  }
-
-  /// Creates a new [`Term`] from a dynamically typed error reference.
-  ///
-  /// This behaves like [`Term::new_error`], but operates on a borrowed error
-  /// value instead of taking ownership.
-  #[inline]
-  pub fn new_error_ref(error: &(dyn Any + Send)) -> Self {
-    match error.downcast_ref::<&str>() {
-      Some(error) => Self::new(error.to_owned()),
-      None => match error.downcast_ref::<String>() {
-        Some(error) => Self::new(error.to_owned()),
-        None => Self::new(format!("unknown error ({error:?})")),
-      },
-    }
-  }
-
   /// Returns `true` if the inner value is of type `T`.
   #[inline]
   pub fn is<T>(&self) -> bool
@@ -114,6 +80,40 @@ impl Term {
   {
     // SAFETY: This is guaranteed to be safe by the caller.
     unsafe { Box::from_raw(Box::into_raw(self.data).cast::<T>()) }
+  }
+
+  /// Creates a new [`Term`] from a dynamically typed error value.
+  ///
+  /// If the error is a `&str` or [`String`], its message is preserved.
+  /// Otherwise, the error is formatted using [`Debug`] and wrapped in a
+  /// generic `"unknown error (...)"` message.
+  ///
+  /// This is primarily intended for converting opaque error values into a
+  /// displayable [`Term`].
+  #[inline]
+  pub(crate) fn new_error(error: Box<dyn Any + Send>) -> Self {
+    match error.downcast::<&str>() {
+      Ok(error) => Self::new(error),
+      Err(error) => match error.downcast::<String>() {
+        Ok(error) => Self::new(error),
+        Err(error) => Self::new(format!("unknown error ({error:?})")),
+      },
+    }
+  }
+
+  /// Creates a new [`Term`] from a dynamically typed error reference.
+  ///
+  /// This behaves like [`Term::new_error`], but operates on a borrowed error
+  /// value instead of taking ownership.
+  #[inline]
+  pub(crate) fn new_error_ref(error: &(dyn Any + Send)) -> Self {
+    match error.downcast_ref::<&str>() {
+      Some(error) => Self::new(error.to_owned()),
+      None => match error.downcast_ref::<String>() {
+        Some(error) => Self::new(error.to_owned()),
+        None => Self::new(format!("unknown error ({error:?})")),
+      },
+    }
   }
 }
 

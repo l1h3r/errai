@@ -13,6 +13,7 @@ use std::task::Poll;
 
 pin_project! {
   #[derive(Debug)]
+  #[repr(transparent)]
   pub(crate) struct CatchUnwind<F> {
     #[pin]
     future: F,

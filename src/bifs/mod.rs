@@ -52,7 +52,7 @@ use crate::utils::CatchUnwind;
 
 // A table mapping internal process identifiers to process data.
 static REGISTERED_PROCS: LazyLock<ProcTable<ProcData>> =
-  LazyLock::new(|| ProcTable::with_capacity(consts::CAP_REGISTERED_PROCS));
+  LazyLock::new(|| ProcTable::with_capacity(consts::MAX_REGISTERED_PROCS));
 
 // A table mapping registered names to internal process identifiers.
 static REGISTERED_NAMES: LazyLock<RwLock<HashMap<Atom, InternalPid>>> =

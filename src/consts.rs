@@ -94,7 +94,7 @@ pub const CAP_PROC_DICTIONARY: usize = 8;
 pub const CAP_PROC_MSG_BUFFER: usize = 8;
 
 // Number of pre-allocated process states.
-pub const CAP_REGISTERED_PROCS: usize = ProcTable::<()>::DEF_ENTRIES;
+pub const MAX_REGISTERED_PROCS: usize = ProcTable::<()>::DEF_ENTRIES;
 
 // Number of pre-allocated registered names.
 pub const CAP_REGISTERED_NAMES: usize = ProcTable::<()>::MIN_ENTRIES;

@@ -3,15 +3,17 @@ mod table;
 mod types;
 
 pub(crate) use self::error::raise;
-pub(crate) use self::table::AtomTable;
-pub(crate) use self::table::AtomTableError;
 
 pub use self::error::Exception;
 pub use self::error::ExceptionClass;
 pub use self::error::ExceptionGroup;
+
+pub use self::table::AtomTable;
+pub use self::table::AtomTableError;
 pub use self::table::ProcTable;
 pub use self::table::ProcTableFull;
 pub use self::table::ProcTableKeys;
+
 pub use self::types::AliasRef;
 pub use self::types::Atom;
 pub use self::types::Exit;
