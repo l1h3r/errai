@@ -28,7 +28,7 @@ const fn pointer_free_bits<T>() -> u32 {
 /// Returns `true` if alignment of `T` is sufficient to store a tag value.
 #[inline]
 const fn pointer_alignment_valid<T>() -> bool {
-  pointer_free_bits::<T>() == ASSUMED_FREE_BITS
+  pointer_free_bits::<T>() >= ASSUMED_FREE_BITS
 }
 
 /// Computes the new value of `addr` tagged with the value `tag`.
