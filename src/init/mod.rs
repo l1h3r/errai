@@ -196,7 +196,7 @@ fn available_cpus() -> usize {
 
 /// Atomically increments and returns the next worker thread ID.
 fn next_worker_id() -> u32 {
-  WORKER_ID.fetch_add(1, Ordering::SeqCst)
+  WORKER_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Generates a unique name for the next worker thread.
