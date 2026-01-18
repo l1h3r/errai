@@ -1,3 +1,54 @@
+//! Atom type providing efficient, interned, immutable string identifiers.
+//!
+//! This module provides the [`Atom`] type, a lightweight handle to globally
+//! interned strings. Atoms enable fast equality comparisons and efficient
+//! memory usage for frequently used string values.
+//!
+//! # Core Properties
+//!
+//! - **Interned**: Each unique string is stored exactly once
+//! - **Immutable**: Atom values cannot be changed after creation
+//! - **Fast comparison**: Equality checks compare 32-bit slot indices
+//! - **Zero-copy**: Converting to string slices requires no allocation
+//!
+//! # Well-Known Atoms
+//!
+//! The runtime pre-allocates several atoms for common values:
+//!
+//! - [`Atom::EMPTY`]: The empty string `""`
+//! - [`Atom::NORMAL`]: Process exit reason `"normal"`
+//! - [`Atom::KILL`]: Unconditional kill signal `"kill"`
+//! - [`Atom::KILLED`]: Killed exit reason `"killed"`
+//! - [`Atom::NOPROC`]: No such process error `"noproc"`
+//! - [`Atom::NOCONN`]: No connection error `"noconn"`
+//! - [`Atom::UNDEFINED`]: Undefined value `"undefined"`
+//!
+//! # Examples
+//!
+//! ```
+//! use errai::core::Atom;
+//!
+//! // Create atoms from strings
+//! let hello = Atom::new("hello");
+//! let world = Atom::from("world");
+//!
+//! // Fast equality (compares slot indices, not strings)
+//! assert_eq!(Atom::new("test"), Atom::new("test"));
+//!
+//! // Access string value
+//! assert_eq!(hello.as_str(), "hello");
+//!
+//! // Use well-known atoms
+//! assert_eq!(Atom::NORMAL, "normal");
+//! ```
+//!
+//! # Performance Characteristics
+//!
+//! - **Creation**: O(1) for existing atoms, O(n) for new atoms
+//! - **Equality**: O(1) integer comparison
+//! - **Ordering**: O(n) string comparison (delegates to underlying string)
+//! - **Memory**: 4 bytes per [`Atom`] instance
+
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::ffi::OsStr;
@@ -12,12 +63,16 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 
 use crate::core::AtomTable;
-use crate::core::raise;
+use crate::raise;
 
 // -----------------------------------------------------------------------------
 // Atom Table
 // -----------------------------------------------------------------------------
 
+/// Global atom table initialized with well-known runtime atoms.
+///
+/// This table is lazily initialized on first access and ensures well-known
+/// atoms occupy their expected slot indices.
 static ATOM_TABLE: LazyLock<AtomTable> = LazyLock::new(|| {
   let table: AtomTable = AtomTable::new();
 
@@ -39,7 +94,39 @@ static ATOM_TABLE: LazyLock<AtomTable> = LazyLock::new(|| {
 // Atom
 // -----------------------------------------------------------------------------
 
-/// A static literal term.
+/// Interned, immutable identifier representing a runtime-wide static string.
+///
+/// Atoms are lightweight handles (32-bit slot indices) to globally interned
+/// strings. They provide fast equality comparisons and efficient memory usage
+/// for string values that appear multiple times in the system.
+///
+/// # Memory Layout
+///
+/// [`Atom`] is a transparent wrapper around a `u32` slot index:
+///
+/// ```text
+/// Atom { slot: u32 }  // 4 bytes
+/// ```
+///
+/// The actual string data lives in the global atom table and is shared
+/// across all [`Atom`] instances with the same value.
+///
+/// # Equality and Ordering
+///
+/// Equality comparisons are performed on slot indices (O(1)), while ordering
+/// comparisons delegate to the underlying string values (O(n)).
+///
+/// # Examples
+///
+/// ```
+/// use errai::core::Atom;
+///
+/// let a1 = Atom::new("hello");
+/// let a2 = Atom::new("hello");
+///
+/// assert_eq!(a1, a2);               // Fast: compares slot indices
+/// assert_eq!(a1.as_str(), "hello"); // Zero-copy string access
+/// ```
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Atom {
@@ -47,30 +134,74 @@ pub struct Atom {
 }
 
 impl Atom {
+  /// Atom representing the empty string.
   pub const EMPTY: Self = Self::from_slot(0);
 
+  /// Atom representing the value `kill`.
+  ///
+  /// Used for unconditional process termination signals.
   pub const KILL: Self = Self::from_slot(1);
+
+  /// Atom representing the value `killed`.
+  ///
+  /// Used as an exit reason when a process is killed.
   pub const KILLED: Self = Self::from_slot(2);
+
+  /// Atom representing the value `normal`.
+  ///
+  /// Used as an exit reason for normal process termination.
   pub const NORMAL: Self = Self::from_slot(3);
 
+  /// Atom representing the value `noproc`.
+  ///
+  /// Used to indicate that a referenced process does not exist.
   pub const NOPROC: Self = Self::from_slot(4);
+
+  /// Atom representing the value `noconn`.
+  ///
+  /// Used to indicate that a connection to a remote node does not exist.
   pub const NOCONN: Self = Self::from_slot(5);
 
+  /// Atom representing the value `undefined`.
+  ///
+  /// Used to represent undefined or uninitialized values.
   pub const UNDEFINED: Self = Self::from_slot(6);
 
-  /// Creates a new `Atom` from an atom table index.
+  /// Constructs an atom from a raw atom table slot.
   #[inline]
   pub(crate) const fn from_slot(slot: u32) -> Self {
     Self { slot }
   }
 
-  /// Returns the index of the atom in the atom table.
+  /// Returns the atom table slot backing this atom.
   #[inline]
   pub(crate) const fn into_slot(self) -> u32 {
     self.slot
   }
 
-  /// Creates a new `Atom` from the given `data`.
+  /// Interns a string and returns its corresponding atom.
+  ///
+  /// If the string has been interned before, returns the existing atom.
+  /// Otherwise, allocates a new slot in the global atom table.
+  ///
+  /// # Panics
+  ///
+  /// Panics if the string exceeds [`MAX_ATOM_BYTES`] or the atom table
+  /// has reached [`MAX_ATOM_COUNT`] capacity.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use errai::core::Atom;
+  ///
+  /// let atom1 = Atom::new("hello");
+  /// let atom2 = Atom::new("hello");
+  ///
+  /// assert_eq!(atom1, atom2); // Same string, same atom
+  /// ```
+  ///
+  /// [`MAX_ATOM_BYTES`]: crate::consts::MAX_ATOM_BYTES
+  /// [`MAX_ATOM_COUNT`]: crate::consts::MAX_ATOM_COUNT
   #[inline]
   pub fn new(data: &str) -> Self {
     match ATOM_TABLE.set(data) {
@@ -79,6 +210,24 @@ impl Atom {
     }
   }
 
+  /// Returns the string value associated with this atom.
+  ///
+  /// This operation is zero-copy and returns a reference to the interned
+  /// string with a `'static` lifetime.
+  ///
+  /// # Panics
+  ///
+  /// Panics if the atom's slot index is invalid. This should never occur
+  /// with atoms constructed through the public API.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use errai::core::Atom;
+  ///
+  /// let atom = Atom::new("example");
+  /// assert_eq!(atom.as_str(), "example");
+  /// ```
   #[inline]
   pub fn as_str(&self) -> &'static str {
     match ATOM_TABLE.get(self.slot) {

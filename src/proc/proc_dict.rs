@@ -9,25 +9,39 @@ use crate::consts::CAP_PROC_DICTIONARY;
 use crate::core::Atom;
 use crate::core::Term;
 
-/// A process dictionary.
+/// Process dictionary providing per-process key-value storage.
+///
+/// The dictionary is lazily allocated on first write to avoid overhead
+/// for processes that never use it. Most processes don't use the dictionary,
+/// making this a worthwhile optimization.
+///
+/// # Lazy Allocation
+///
+/// The underlying [`HashMap`] is `None` until the first `insert()` call.
+/// Read operations on an empty dictionary return `None` without allocation.
 #[repr(transparent)]
 pub(crate) struct ProcDict {
   inner: Option<HashMap<Atom, Term>>,
 }
 
 impl ProcDict {
+  /// Allocates the underlying hash map with initial capacity.
   #[inline]
   fn alloc_table() -> HashMap<Atom, Term> {
     HashMap::with_capacity(CAP_PROC_DICTIONARY)
   }
 
-  /// Creates a new `ProcDict`.
+  /// Creates a new, empty process dictionary.
+  ///
+  /// No allocation occurs until the first insertion.
   #[inline]
   pub(crate) fn new() -> Self {
     Self { inner: None }
   }
 
-  /// Returns a cloned copy of the term corresponding to `key`.
+  /// Returns a cloned copy of the value for `key`.
+  ///
+  /// Returns `None` if the key is not present or the dictionary is empty.
   pub(crate) fn get<Q>(&self, key: &Q) -> Option<Term>
   where
     Atom: Borrow<Q>,
@@ -38,7 +52,8 @@ impl ProcDict {
 
   /// Inserts a key-value pair into the dictionary.
   ///
-  /// Returns the previous value, or `None`.
+  /// Allocates the underlying map on first insertion. Returns the previous
+  /// value if the key was already present.
   pub(crate) fn insert(&mut self, atom: Atom, term: Term) -> Option<Term> {
     self
       .inner
@@ -46,8 +61,9 @@ impl ProcDict {
       .insert(atom, term)
   }
 
-  /// Removes `key` from the dictionary and returns the value if it was set,
-  /// otherwise returns `None`.
+  /// Removes `key` from the dictionary and returns its value.
+  ///
+  /// Returns `None` if the key is not present or the dictionary is empty.
   pub(crate) fn remove<Q>(&mut self, key: &Q) -> Option<Term>
   where
     Atom: Borrow<Q>,
@@ -56,7 +72,9 @@ impl ProcDict {
     self.inner.as_mut().and_then(|data| data.remove(key))
   }
 
-  /// Clears the dictionary, removing all key-value pairs.
+  /// Clears the dictionary and returns all key-value pairs.
+  ///
+  /// Returns an empty vector if the dictionary was never allocated.
   #[inline]
   pub(crate) fn clear(&mut self) -> Vec<(Atom, Term)> {
     self
@@ -67,6 +85,8 @@ impl ProcDict {
   }
 
   /// Returns a list of all key-value pairs in the dictionary.
+  ///
+  /// Returns an empty vector if the dictionary is empty or unallocated.
   pub(crate) fn pairs(&self) -> Vec<(Atom, Term)> {
     #[inline]
     fn clone((atom, term): (&Atom, &Term)) -> (Atom, Term) {
@@ -81,6 +101,8 @@ impl ProcDict {
   }
 
   /// Returns a list of all keys in the dictionary.
+  ///
+  /// Returns an empty vector if the dictionary is empty or unallocated.
   pub(crate) fn keys(&self) -> Vec<Atom> {
     self
       .inner
@@ -90,6 +112,8 @@ impl ProcDict {
   }
 
   /// Returns a list of all values in the dictionary.
+  ///
+  /// Returns an empty vector if the dictionary is empty or unallocated.
   pub(crate) fn values(&self) -> Vec<Term> {
     self
       .inner

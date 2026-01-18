@@ -11,12 +11,43 @@ mod private {
 impl private::Sealed for ExternalPid {}
 impl private::Sealed for InternalPid {}
 
+/// Trait implemented by all process identifier representations.
+///
+/// This sealed trait provides a common interface for [`InternalPid`] and
+/// [`ExternalPid`], enabling generic code that works with both local and
+/// distributed processes.
+///
+/// # Sealed Trait
+///
+/// This trait is sealed and cannot be implemented outside this crate. Only
+/// [`InternalPid`] and [`ExternalPid`] implement it.
+///
+/// # Examples
+///
+/// ```
+/// use errai::core::{InternalPid, ExternalPid, ProcessId};
+///
+/// fn is_local<P: ProcessId>(pid: P) -> bool {
+///   !P::DISTRIBUTED
+/// }
+///
+/// let local = InternalPid::from_bits(0x123);
+/// assert!(is_local(local));
+/// ```
 pub trait ProcessId: private::Sealed + Copy + Debug + Display {
+  /// Indicates whether this process identifier is distributed.
+  ///
+  /// Returns `true` for [`ExternalPid`] and `false` for [`InternalPid`].
   const DISTRIBUTED: bool;
 
-  /// Converts `self` into an internal PID.
+  /// Converts this identifier into its internal PID representation.
+  ///
+  /// For [`InternalPid`], this returns `self`. For [`ExternalPid`], this
+  /// extracts the local PID component, discarding node information.
   fn into_internal(self) -> InternalPid;
 
-  /// Converts `self` into an external PID.
+  /// Converts this identifier into an external PID representation.
+  ///
+  /// Returns [`Some`] for [`ExternalPid`] and [`None`] for [`InternalPid`].
   fn into_external(self) -> Option<ExternalPid>;
 }

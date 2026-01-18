@@ -7,7 +7,15 @@ use crate::core::Atom;
 use crate::core::InternalPid;
 use crate::core::ProcessId;
 
-/// An external process identifier.
+/// Identifier uniquely naming a process on a remote node.
+///
+/// External PIDs combine an [`InternalPid`] with a node name, enabling
+/// process addressing across distributed nodes.
+///
+/// # Format
+///
+/// External PIDs display as `#PID<Node.Number.Serial>` where `Node` is the
+/// atom slot identifying the originating node.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]
 pub struct ExternalPid {
@@ -16,19 +24,33 @@ pub struct ExternalPid {
 }
 
 impl ExternalPid {
-  /// Creates a new `ExternalPid`.
+  /// Creates a new external PID from internal bits and node name.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use errai::core::{Atom, ExternalPid, InternalPid};
+  ///
+  /// let bits = InternalPid::from_bits(0x456);
+  /// let node = Atom::new("remote@host");
+  /// let pid = ExternalPid::new(bits, node);
+  /// ```
   #[inline]
   pub const fn new(bits: InternalPid, node: Atom) -> Self {
     Self { bits, node }
   }
 
-  /// Returns the raw PID bits.
+  /// Returns the internal PID component.
+  ///
+  /// This extracts the local PID portion, discarding node information.
   #[inline]
   pub const fn bits(&self) -> InternalPid {
     self.bits
   }
 
-  /// Returns the name of the node that spawned this PID.
+  /// Returns the node name that spawned this process.
+  ///
+  /// This identifies which node in the distributed system owns the process.
   #[inline]
   pub const fn node(&self) -> Atom {
     self.node

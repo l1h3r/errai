@@ -1,3 +1,35 @@
+//! Global atom interning table with permanent storage semantics.
+//!
+//! This module provides a thread-safe string interning table that permanently
+//! stores unique string values. Once interned, atoms are never deallocated and
+//! can be referenced by their numeric slot identifier.
+//!
+//! # Atom Semantics
+//!
+//! Atoms are immutable, interned strings with the following properties:
+//!
+//! - **Permanent storage**: Once created, atoms live for the runtime's lifetime
+//! - **Unique representation**: Each distinct string is stored exactly once
+//! - **Fast comparison**: Atoms can be compared by their slot index (u32)
+//! - **Bounded capacity**: Limited to [`MAX_ATOM_COUNT`] distinct atoms
+//!
+//! # Thread Safety
+//!
+//! The atom table uses a read-write lock with an optimized fast path for
+//! existing atoms. Most lookups only require a read lock, while new atom
+//! creation requires a write lock.
+//!
+//! # Memory Considerations
+//!
+//! Atoms are **never deallocated**. Each interned string consumes memory
+//! permanently. To prevent unbounded growth:
+//!
+//! - Maximum atom count: [`MAX_ATOM_COUNT`]
+//! - Maximum atom size: [`MAX_ATOM_BYTES`]
+//!
+//! Avoid creating atoms from untrusted or dynamic input that could exhaust
+//! the table capacity.
+
 use hashbrown::DefaultHashBuilder;
 use hashbrown::HashMap;
 use parking_lot::RwLock;
@@ -20,11 +52,25 @@ use crate::consts::MAX_ATOM_COUNT;
 // Atom Table Error
 // -----------------------------------------------------------------------------
 
+/// Errors returned from atom table lookup or insertion operations.
+///
+/// These errors indicate capacity limits or invalid atom access.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum AtomTableError {
+  /// The atom exceeds the maximum allowed byte length.
+  ///
+  /// Atoms are limited to [`MAX_ATOM_BYTES`] UTF-8 bytes to prevent
+  /// excessive memory consumption per atom.
   AtomTooLarge,
+  /// The atom table has reached its maximum capacity.
+  ///
+  /// The table is limited to [`MAX_ATOM_COUNT`] distinct atoms. This
+  /// prevents unbounded memory growth from dynamic atom creation.
   TooManyAtoms,
+  /// The requested atom slot does not exist.
+  ///
+  /// This indicates an invalid slot index was provided to [`AtomTable::get()`].
   AtomNotFound,
 }
 
@@ -44,17 +90,30 @@ impl Error for AtomTableError {}
 // Atom Table
 // -----------------------------------------------------------------------------
 
-/// Atom interning table.
+/// Thread-safe atom interning table with permanent storage.
 ///
-/// # Memory behavior
+/// This table stores unique strings permanently and provides fast lookups
+/// via numeric slot identifiers. Interned strings are never deallocated.
+///
+/// # Implementation Details
+///
+/// The table uses a two-level structure:
+///
+/// 1. **HashMap**: Maps strings to slot indices for O(1) lookup
+/// 2. **Block array**: Stores the actual string data in fixed-size blocks
+///
+/// This design balances memory efficiency with lookup performance while
+/// supporting lock-free reads for existing atoms.
+///
+/// # Memory Behavior
 ///
 /// Atoms are interned permanently and are **never deallocated** for the
 /// lifetime of the runtime.
 ///
 /// To mitigate unbounded growth, the table enforces the following limits:
 ///
-/// - `MAX_ATOM_COUNT`: maximum number of distinct atoms
-/// - `MAX_ATOM_BYTES`: maximum UTF-8 byte length per atom
+/// - [`MAX_ATOM_COUNT`]: maximum number of distinct atoms
+/// - [`MAX_ATOM_BYTES`]: maximum UTF-8 byte length per atom
 ///
 /// These limits provide operational safety but do **not** make atom creation
 /// reversible. Creating atoms dynamically from untrusted input may still lead
@@ -65,6 +124,10 @@ pub struct AtomTable {
 }
 
 impl AtomTable {
+  /// Creates a new empty atom table with initial capacity allocated.
+  ///
+  /// The table is pre-allocated with space for the first block of atoms
+  /// to avoid early allocations during startup.
   #[inline]
   pub fn new() -> Self {
     Self {
@@ -72,6 +135,14 @@ impl AtomTable {
     }
   }
 
+  /// Returns the atom string for the given table slot.
+  ///
+  /// This operation only requires a read lock and is highly concurrent.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`AtomTableError::AtomNotFound`] if the slot is invalid or
+  /// has not been allocated yet.
   pub fn get(&self, slot: u32) -> Result<&str, AtomTableError> {
     let guard: RwLockReadGuard<'_, Table> = self.inner.read();
     let index: usize = slot as usize;
@@ -87,6 +158,28 @@ impl AtomTable {
     Ok(value)
   }
 
+  /// Interns a string and returns its atom table slot.
+  ///
+  /// If the string is already interned, returns the existing slot without
+  /// modification. Otherwise, allocates a new slot and stores the string.
+  ///
+  /// # Concurrency
+  ///
+  /// This method uses an optimized two-phase locking strategy:
+  ///
+  /// 1. **Fast path**: Acquires read lock to check for existing atom
+  /// 2. **Slow path**: Upgrades to write lock only for new atoms
+  ///
+  /// Most calls only require a read lock, providing excellent concurrency
+  /// for workloads with repeated atom creation.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`AtomTableError::AtomTooLarge`] if the string exceeds
+  /// [`MAX_ATOM_BYTES`].
+  ///
+  /// Returns [`AtomTableError::TooManyAtoms`] if the table has reached
+  /// [`MAX_ATOM_COUNT`] capacity.
   pub fn set(&self, data: &str) -> Result<u32, AtomTableError> {
     // -------------------------------------------------------------------------
     // 1. Fast Path - Existing Atom
@@ -165,19 +258,28 @@ impl Debug for AtomTable {
 // Atom Table - Table
 // -----------------------------------------------------------------------------
 
+/// Internal table structure holding atom data and lookup map.
+///
+/// This structure is protected by the [`AtomTable`]'s [`RwLock`] and should
+/// not be accessed directly.
 #[repr(C)]
 struct Table {
+  /// Maps interned strings to their slot indices for fast lookup.
   map: HashMap<&'static str, u32, DefaultHashBuilder>,
+  /// Array of blocks storing the actual string data.
   arr: Vec<Block>,
+  /// Total number of interned atoms across all blocks.
   len: usize,
 }
 
 impl Table {
+  /// Maximum number of blocks needed to store [`MAX_ATOM_COUNT`] atoms.
   const BLOCKS: usize = MAX_ATOM_COUNT
     .strict_add(Block::SIZE)
     .strict_sub(1)
     .strict_div(Block::SIZE);
 
+  /// Creates a new table with one pre-allocated block.
   #[inline]
   fn new() -> Self {
     let mut this: Self = Self {
@@ -190,11 +292,13 @@ impl Table {
     this
   }
 
+  /// Returns the current total capacity across all allocated blocks.
   #[inline]
   fn cap(&self) -> usize {
     self.arr.len() * Block::SIZE
   }
 
+  /// Returns the number of interned atoms.
   #[inline]
   fn len(&self) -> usize {
     self.len
@@ -205,16 +309,26 @@ impl Table {
 // Atom Table - Block
 // -----------------------------------------------------------------------------
 
+/// Fixed-size storage block for atom strings.
+///
+/// Blocks organize atoms into fixed-size arrays to enable efficient indexing
+/// via bit manipulation. Each block stores [`Block::SIZE`] atom slots.
 #[repr(transparent)]
 struct Block {
   inner: [&'static str; Self::SIZE],
 }
 
 impl Block {
+  /// Bit width for block-local slot indexing.
   const BITS: u32 = 10;
+
+  /// Number of atom slots per block (2^10 = 1024).
   const SIZE: usize = 1_usize.strict_shl(Self::BITS);
+
+  /// Bitmask for extracting block-local slot index.
   const MASK: usize = Self::SIZE.strict_sub(1);
 
+  /// Creates a new block with all slots initialized to empty strings.
   #[inline]
   const fn new() -> Self {
     Self {
@@ -222,6 +336,11 @@ impl Block {
     }
   }
 
+  /// Returns a reference to the atom at the given block-local index.
+  ///
+  /// # Safety
+  ///
+  /// The caller must ensure `index` is within bounds.
   #[inline]
   unsafe fn get_unchecked<I>(&self, index: I) -> &<I as SliceIndex<[&'static str]>>::Output
   where
@@ -231,6 +350,11 @@ impl Block {
     unsafe { self.inner.get_unchecked(index) }
   }
 
+  /// Returns a mutable reference to the atom at the given block-local index.
+  ///
+  /// # Safety
+  ///
+  /// The caller must ensure `index` is within bounds.
   #[inline]
   unsafe fn get_unchecked_mut<I>(
     &mut self,

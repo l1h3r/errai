@@ -29,7 +29,15 @@ use crate::proc::ProcReadOnly;
 // Signal Emit
 // -----------------------------------------------------------------------------
 
+/// Trait for sending signals to a process.
+///
+/// Implemented by all signal types to enable polymorphic signal sending.
+/// Signals are enqueued in the target process's signal queue.
 pub(crate) trait SignalEmit {
+  /// Sends this signal to the target process.
+  ///
+  /// The signal is enqueued in the process's signal queue and will be
+  /// processed asynchronously by the process task loop.
   fn emit(self, to: &ProcReadOnly);
 }
 
@@ -37,7 +45,22 @@ pub(crate) trait SignalEmit {
 // Signal Recv
 // -----------------------------------------------------------------------------
 
+/// Trait for processing received signals.
+///
+/// Implemented by all signal types to define their handling logic.
+/// Signal processing may modify process state or trigger termination.
 pub(crate) trait SignalRecv {
+  /// Processes this signal in the context of the receiving process.
+  ///
+  /// Returns [`Exit`] if the signal should terminate the process,
+  /// or [`None`] if processing completes without termination.
+  ///
+  /// # State Modifications
+  ///
+  /// Signal processing may:
+  /// - Add/remove links or monitors
+  /// - Enqueue messages in the inbox
+  /// - Modify process flags
   fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit>;
 }
 
@@ -45,6 +68,12 @@ pub(crate) trait SignalRecv {
 // Signal
 // -----------------------------------------------------------------------------
 
+/// Top-level signal type wrapping message and control signals.
+///
+/// Signals are categorized into:
+///
+/// - **Message**: Regular user messages
+/// - **Control**: System signals (exit, link, monitor)
 #[derive(Clone, Debug)]
 pub(crate) enum Signal {
   Message(MessageSignal),
@@ -52,6 +81,7 @@ pub(crate) enum Signal {
 }
 
 impl Signal {
+  /// Returns the signal category as a short string ("M" or "C").
   #[inline]
   const fn kind(&self) -> &'static str {
     match self {
@@ -60,6 +90,7 @@ impl Signal {
     }
   }
 
+  /// Returns the sender PID.
   #[inline]
   const fn from(&self) -> InternalPid {
     match self {
@@ -99,6 +130,7 @@ impl SignalRecv for Signal {
 // Message Signal
 // -----------------------------------------------------------------------------
 
+/// Message signals containing user data.
 #[derive(Clone, Debug)]
 pub(crate) enum MessageSignal {
   Send(SignalSend),
@@ -140,24 +172,39 @@ impl From<SignalSend> for MessageSignal {
 // Control Signal
 // -----------------------------------------------------------------------------
 
+/// Control signals for process coordination and lifecycle.
+///
+/// Control signals manage:
+///
+/// - Process termination (Exit)
+/// - Process links (Link, LinkExit, Unlink, UnlinkAck)
+/// - Process monitors (Monitor, MonitorDown, Demonitor)
 #[derive(Clone, Debug)]
 pub(crate) enum ControlSignal {
   // ---------------------------------------------------------------------------
   // Termination Signals
   // ---------------------------------------------------------------------------
+  /// Unconditional exit signal.
   Exit(SignalExit),
   // ---------------------------------------------------------------------------
   // Link Signals
   // ---------------------------------------------------------------------------
+  /// Establish a link between processes.
   Link(SignalLink),
+  /// Exit signal from a linked process.
   LinkExit(SignalLinkExit),
+  /// Request to unlink from a process.
   Unlink(SignalUnlink),
+  /// Acknowledgment of unlink request.
   UnlinkAck(SignalUnlinkAck),
   // ---------------------------------------------------------------------------
   // Monitor Signals
   // ---------------------------------------------------------------------------
+  /// Establish a monitor on a process.
   Monitor(SignalMonitor),
+  /// Notification that a monitored process terminated.
   MonitorDown(SignalMonitorDown),
+  /// Remove a monitor on a process.
   Demonitor(SignalDemonitor),
 }
 
@@ -267,6 +314,9 @@ impl From<SignalDemonitor> for ControlSignal {
 // Signal - Send
 // -----------------------------------------------------------------------------
 
+/// Regular message signal containing user data.
+///
+/// Sent via `Process::send()` and delivered to the inbox for selective receive.
 #[derive(Clone, Debug)]
 pub(crate) struct SignalSend {
   from: InternalPid,
@@ -295,6 +345,9 @@ impl SignalEmit for SignalSend {
 //
 // The content of the message is moved to the internal inbox buffer.
 impl SignalRecv for SignalSend {
+  /// Enqueues the message in the inbox.
+  ///
+  /// This signal never causes termination.
   fn recv(self, _readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     tracing::trace!(signal = "send");
 
@@ -310,6 +363,10 @@ impl SignalRecv for SignalSend {
 // Signal - Exit
 // -----------------------------------------------------------------------------
 
+/// Unconditional exit signal.
+///
+/// Sent via `Process::exit()` to terminate a process. Processing depends
+/// on the exit reason and trap_exit flag.
 #[derive(Clone, Debug)]
 pub(crate) struct SignalExit {
   from: InternalPid,
@@ -335,6 +392,22 @@ impl SignalEmit for SignalExit {
 }
 
 impl SignalRecv for SignalExit {
+  /// Processes the exit signal according to its reason and flags.
+  ///
+  /// # Normal Exits
+  ///
+  /// - **trap_exit enabled**: Converted to EXIT message
+  /// - **Self-sent**: Terminates process
+  /// - **Other sender**: Ignored
+  ///
+  /// # Kill Exits
+  ///
+  /// Always terminate the process (cannot be trapped).
+  ///
+  /// # Custom Exits
+  ///
+  /// - **trap_exit enabled**: Converted to EXIT message
+  /// - **trap_exit disabled**: Terminates process
   fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     tracing::trace!(signal = "exit", exit = %self.exit);
 
@@ -373,10 +446,10 @@ impl SignalRecv for SignalExit {
 // Signal - Link
 // -----------------------------------------------------------------------------
 
-// Link signal handling:
-//
-// If no link state exists for the sender, a default enabled state is inserted;
-// otherwise, the signal is dropped.
+/// Signal to establish a bidirectional link between processes.
+///
+/// Links enable crash propagation: when one process terminates abnormally,
+/// linked processes are notified via LinkExit signals.
 #[derive(Clone, Debug)]
 pub(crate) struct SignalLink {
   from: InternalPid,
@@ -401,6 +474,10 @@ impl SignalEmit for SignalLink {
 }
 
 impl SignalRecv for SignalLink {
+  /// Establishes a link if one doesn't already exist.
+  ///
+  /// If a link already exists for the sender, this signal is ignored.
+  /// Otherwise, a new enabled link is created.
   fn recv(self, _readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     tracing::trace!(signal = "link");
 
@@ -422,6 +499,10 @@ impl SignalRecv for SignalLink {
 // Signal - LinkExit
 // -----------------------------------------------------------------------------
 
+/// Exit signal from a linked process.
+///
+/// Sent automatically when a linked process terminates. Processing depends
+/// on the link state, exit reason, and trap_exit flag.
 #[derive(Clone, Debug)]
 pub(crate) struct SignalLinkExit {
   from: InternalPid,
@@ -446,12 +527,22 @@ impl SignalEmit for SignalLinkExit {
   }
 }
 
-// Exit signal handling (linked):
-//
-// If the link state exists and the process is trapping exits, the signal is
-// converted to an `ExitMessage` and delivered to the inbox. If the reason is
-// not normal, the receiving process is terminated.
 impl SignalRecv for SignalLinkExit {
+  /// Processes exit signal from a linked process.
+  ///
+  /// # Processing Rules
+  ///
+  /// Requires an active (enabled) link to the sender:
+  ///
+  /// - **trap_exit enabled**: Converted to EXIT message
+  /// - **Normal exit**: Ignored (doesn't propagate)
+  /// - **Kill exit**: Terminates process
+  /// - **Custom exit**: Terminates process
+  ///
+  /// Signals are ignored if:
+  ///
+  /// - No link exists
+  /// - Link is disabled (unlink in progress)
   fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     tracing::trace!(signal = "link exit", exit = %self.exit);
 
@@ -487,6 +578,10 @@ impl SignalRecv for SignalLinkExit {
 // Signal - Unlink
 // -----------------------------------------------------------------------------
 
+/// Request to remove a bidirectional link.
+///
+/// Part of the two-phase unlink protocol. The receiver removes the link
+/// and sends back UnlinkAck.
 #[derive(Clone, Debug)]
 pub(crate) struct SignalUnlink {
   from: InternalPid,
@@ -511,11 +606,18 @@ impl SignalEmit for SignalUnlink {
   }
 }
 
-// Unlink signal handling:
-//
-// If the link state exists and is enabled, it is removed and the sender
-// receives an `UnlinkAck` signal. If not, the signal is dropped.
 impl SignalRecv for SignalUnlink {
+  /// Processes unlink request and sends acknowledgment.
+  ///
+  /// If an enabled link exists:
+  ///
+  /// 1. Sends UnlinkAck back to the sender (if sender still exists)
+  /// 2. Removes the link
+  ///
+  /// Signals are ignored if:
+  ///
+  /// - No link exists
+  /// - Link is already disabled
   fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     tracing::trace!(signal = "unlink", ulid = %self.ulid);
 
@@ -548,6 +650,10 @@ impl SignalRecv for SignalUnlink {
 // Signal - UnlinkAck
 // -----------------------------------------------------------------------------
 
+/// Acknowledgment of an unlink request.
+///
+/// Completes the two-phase unlink protocol. The sender removes the link
+/// if the unlink ID matches.
 #[derive(Clone, Debug)]
 pub(crate) struct SignalUnlinkAck {
   from: InternalPid,
@@ -572,11 +678,18 @@ impl SignalEmit for SignalUnlinkAck {
   }
 }
 
-// UnlinkAck signal handling:
-//
-// If the link state exists, is disabled, and the given `ulid` matches, the link
-// state is removed. Otherwise, the signal is dropped.
 impl SignalRecv for SignalUnlinkAck {
+  /// Completes the unlink if the ID matches.
+  ///
+  /// The link is removed only if:
+  ///
+  /// - A disabled link exists for the sender
+  /// - The unlink ID matches the stored ID
+  ///
+  /// This prevents removing a link if:
+  ///
+  /// - The link was re-enabled
+  /// - A stale acknowledgment arrives
   fn recv(self, _readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     tracing::trace!(signal = "unlink ack", ulid = %self.ulid);
 
@@ -606,6 +719,10 @@ impl SignalRecv for SignalUnlinkAck {
 // Signal - Monitor
 // -----------------------------------------------------------------------------
 
+/// Request to monitor a process.
+///
+/// Establishes a unidirectional monitor. When the monitored process
+/// terminates, a MonitorDown signal is sent back.
 #[derive(Clone, Debug)]
 pub(crate) struct SignalMonitor {
   from: InternalPid,
@@ -631,11 +748,11 @@ impl SignalEmit for SignalMonitor {
   }
 }
 
-// Monitor signal handling:
-//
-// If the monitor state does not exist, a default state is inserted;
-// otherwise, the signal is dropped.
 impl SignalRecv for SignalMonitor {
+  /// Establishes a monitor if one doesn't already exist for this reference.
+  ///
+  /// If a monitor with the same reference already exists, this signal is
+  /// ignored. Otherwise, monitor state is created.
   fn recv(self, _readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     tracing::trace!(signal = "monitor", mref = %self.mref, item = %self.item);
 
@@ -657,6 +774,10 @@ impl SignalRecv for SignalMonitor {
 // Signal - MonitorDown
 // -----------------------------------------------------------------------------
 
+/// Notification that a monitored process has terminated.
+///
+/// Sent automatically when a monitored process exits. Delivered as a
+/// DOWN message to the monitoring process.
 #[derive(Clone, Debug)]
 pub(crate) struct SignalMonitorDown {
   from: InternalPid,
@@ -682,11 +803,15 @@ impl SignalEmit for SignalMonitorDown {
   }
 }
 
-// MonitorDown signal handling:
-//
-// If the monitor state exists, it is removed and the signal is sent to the
-// internal inbox buffer. If not, the signal is dropped.
 impl SignalRecv for SignalMonitorDown {
+  /// Delivers DOWN message and removes monitor state.
+  ///
+  /// If monitor state exists for the reference:
+  ///
+  /// 1. Sends DOWN message to the monitoring process
+  /// 2. Removes the monitor state
+  ///
+  /// Ignored if no monitor state exists (monitor was removed).
   fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     tracing::trace!(signal = "monitor down", mref = %self.mref);
 
@@ -716,6 +841,10 @@ impl SignalRecv for SignalMonitorDown {
 // Signal - Demonitor
 // -----------------------------------------------------------------------------
 
+/// Request to remove a monitor.
+///
+/// Sent when a process calls demonitor. Removes the monitor state,
+/// preventing DOWN messages from being delivered.
 #[derive(Clone, Debug)]
 pub(crate) struct SignalDemonitor {
   from: InternalPid,
@@ -741,6 +870,9 @@ impl SignalEmit for SignalDemonitor {
 }
 
 impl SignalRecv for SignalDemonitor {
+  /// Removes monitor state if it exists.
+  ///
+  /// Ignored if no monitor state exists for the reference.
   fn recv(self, _readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     tracing::trace!(signal = "demonitor", mref = %self.mref);
 

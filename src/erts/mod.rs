@@ -1,4 +1,32 @@
-//! Core "erts" types of the Errai runtime system.
+//! Core ERTS (Errai Runtime System) types and APIs.
+//!
+//! This module provides the main user-facing types for process management,
+//! messaging, and runtime control. It follows the BEAM terminology where
+//! "ERTS" refers to the runtime system components.
+//!
+//! # Public API
+//!
+//! - [`Process`]: Main process API for spawning, messaging, and coordination
+//! - [`ProcessFlags`]: Process behavior flags (trap_exit, async_dist)
+//! - [`Runtime`]: Runtime control and system time
+//! - [`Message`]: Message envelope for received messages
+//! - [`ExitMessage`]: Trapped exit signal
+//! - [`DownMessage`]: Monitor notification
+//! - [`SpawnConfig`]: Process spawn configuration
+//! - [`SpawnHandle`]: Handle to spawned process
+//!
+//! # Internal Components
+//!
+//! - Signal types: Internal signal protocol implementation
+//! - Signal traits: Signal emission and reception
+//!
+//! # Module Organization
+//!
+//! - `message`: Message types and downcasting
+//! - `process`: Process API implementation
+//! - `runtime`: Runtime control functions
+//! - `signal`: Signal protocol (internal)
+//! - `spawn`: Spawn configuration types
 
 mod message;
 mod process;

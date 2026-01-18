@@ -1,33 +1,58 @@
+//! Trait defining type-erased runtime values usable within [`Term`].
+//!
+//! This module provides the internal [`Item`] trait that enables dynamic
+//! typing in [`Term`]. Most users will work with [`Term`] directly rather
+//! than implementing [`Item`] manually.
+//!
+//! [`Term`]: crate::core::Term
+
 use dyn_clone::DynClone;
 use std::any::Any;
 use std::fmt::Debug;
 
-/// A dynamically typed value used by the runtime.
+/// Trait implemented by all values stored inside a [`Term`].
 ///
-/// `Item` represents an arbitrary value that can be passed through the runtime
-/// in a type-erased form while still supporting cloning, formatting, and safe
-/// downcasting.
+/// This trait enables safe dynamic typing, cloning, and thread-safe sharing
+/// of values across process boundaries.
 ///
-/// All [`Item`]s:
-/// - Are `'static` and thread-safe
-/// - Support cloning via [`DynClone`]
-/// - Can be formatted using [`Debug`]
-/// - Can be dynamically inspected through [`Any`]
+/// # Automatic Implementation
+///
+/// [`Item`] is automatically implemented for all types that satisfy:
+///
+/// - [`Any`]: Required for downcasting
+/// - [`Debug`]: Required for diagnostic output
+/// - [`DynClone`]: Required for cloning trait objects
+/// - [`Send`] + [`Sync`]: Required for inter-process communication
+/// - `'static`: Required for type erasure
+///
+/// Most types can be used in [`Term`] without explicit [`Item`] implementation.
+///
+/// # Examples
+///
+/// ```
+/// use errai::core::Term;
+///
+/// // These types automatically implement Item:
+/// let t1 = Term::new(42_i32);
+/// let t2 = Term::new(String::from("hello"));
+/// let t3 = Term::new(vec![1, 2, 3]);
+/// ```
+///
+/// [`Term`]: crate::core::Term
 pub trait Item: Any + Debug + DynClone + Send + Sync + 'static {
   /// Returns a shared reference to this value as [`Any`].
   ///
-  /// This enables runtime type inspection and safe downcasting.
+  /// This enables downcasting to the concrete type.
   fn as_any(&self) -> &(dyn Any + Send + Sync);
 
   /// Returns a mutable reference to this value as [`Any`].
   ///
-  /// This enables mutable runtime downcasting.
+  /// This enables mutable downcasting to the concrete type.
   fn as_mut_any(&mut self) -> &mut (dyn Any + Send + Sync);
 
-  /// Converts this value into a boxed [`Any`].
+  /// Converts this value into a boxed [`Any`] trait object.
   ///
-  /// This consumes the boxed item and erases its concrete type, allowing it
-  /// to be transferred or stored without retaining the [`Item`] interface.
+  /// This enables owned downcasting to the concrete type.
   fn into_any(self: Box<Self>) -> Box<dyn Any + Send + Sync>;
 }
 

@@ -16,12 +16,12 @@ use crate::core::MonitorRef;
 use crate::core::ProcessId;
 use crate::core::Term;
 use crate::core::TimerRef;
-use crate::core::raise;
 use crate::erts::DynMessage;
 use crate::erts::Message;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
 use crate::proc::ProcTask;
+use crate::raise;
 
 // -----------------------------------------------------------------------------
 // @data - Task Globals
@@ -233,7 +233,7 @@ impl Process {
   ///
   /// Raises [`Exception`] if the destination is an unregistered name.
   ///
-  /// [`Exception`]: crate::core::Exception
+  /// [`Exception`]: crate::error::Exception
   pub fn send<T>(dest: impl Into<ExternalDest>, term: T)
   where
     T: Item,
@@ -404,7 +404,7 @@ impl Process {
   /// - The PID is currently registered under a different name
   /// - The name is already registered to another PID
   ///
-  /// [`Exception`]: crate::core::Exception
+  /// [`Exception`]: crate::error::Exception
   pub fn register(pid: InternalPid, name: impl Into<Atom>) {
     Self::with(|this| bifs::process_register(this, pid, name.into()))
   }
@@ -417,7 +417,7 @@ impl Process {
   ///
   /// Raises [`Exception`] if the name is not registered to any PID.
   ///
-  /// [`Exception`]: crate::core::Exception
+  /// [`Exception`]: crate::error::Exception
   pub fn unregister(name: impl Into<Atom>) {
     Self::with(|this| bifs::process_unregister(this, name.into()))
   }

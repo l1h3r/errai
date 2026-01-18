@@ -6,7 +6,18 @@ use std::fmt::Result;
 use crate::core::Atom;
 use crate::core::InternalRef;
 
-/// An external reference.
+/// Reference identifying a remote object on a distributed node.
+///
+/// External references combine an [`InternalRef`] with a node identifier,
+/// enabling unique identification across multiple nodes in a distributed
+/// system.
+///
+/// # Format
+///
+/// External references display as `#Ref<N.X.Y.Z>` where:
+///
+/// - `N`: Node atom slot (identifies which node created the reference)
+/// - `X`, `Y`, `Z`: 32-bit components from the internal reference
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]
 pub struct ExternalRef {
@@ -15,19 +26,24 @@ pub struct ExternalRef {
 }
 
 impl ExternalRef {
-  /// Creates a new `ExternalRef`.
+  /// Creates a new external reference from internal bits and node name.
   #[inline]
   pub const fn new(bits: InternalRef, node: Atom) -> Self {
     Self { bits, node }
   }
 
-  /// Returns the raw reference bits.
+  /// Returns the internal reference component.
+  ///
+  /// This extracts the local reference portion, discarding node information.
   #[inline]
   pub const fn bits(&self) -> InternalRef {
     self.bits
   }
 
-  /// Returns the name of the node that spawned this reference.
+  /// Returns the node name that created this reference.
+  ///
+  /// This identifies which node in the distributed system originated the
+  /// reference.
   #[inline]
   pub const fn node(&self) -> Atom {
     self.node

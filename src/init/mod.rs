@@ -27,14 +27,50 @@ use crate::erts::ProcessFlags;
 
 type PanicHook = Box<dyn Fn(&PanicHookInfo<'_>) + Sync + Send + 'static>;
 
-// Counter used to generate unique names for worker threads
+/// Counter for generating unique worker thread names.
 static WORKER_ID: AtomicU32 = AtomicU32::new(1);
 
-/// Runs the given `future` to completion on the Errai runtime system.
+/// Runs the given future to completion on the Errai runtime system.
 ///
-/// This is the main entrypoint to the Errai runtime.
+/// This function initializes the runtime, executes the provided future as
+/// a supervised process, and performs graceful shutdown. It is the sole
+/// entrypoint to the Errai system.
 ///
-/// Note: This function terminates upon completion!
+/// # Process Exit
+///
+/// This function **never returns**. It calls [`process::exit()`] with one
+/// of the following codes:
+///
+/// - `0`: Normal termination (application completed successfully)
+/// - `-1`: Initialization failed (tracing, runtime creation)
+/// - `-2`: Execution failed (runtime or shutdown error)
+///
+/// # Initialization
+///
+/// The runtime performs these initialization steps:
+///
+/// 1. Configures global tracing subscriber
+/// 2. Installs panic hook for exception logging
+/// 3. Builds Tokio multi-threaded runtime
+/// 4. Spawns root supervisor process
+/// 5. Spawns application process (your future)
+///
+/// # Shutdown
+///
+/// When the application process terminates, the root supervisor initiates
+/// shutdown:
+///
+/// 1. Receives exit signal from application
+/// 2. Signals runtime to stop
+/// 3. Waits up to [`SHUTDOWN_TIMEOUT`] for cleanup
+/// 4. Exits process with appropriate code
+///
+/// # Panics
+///
+/// Panics during initialization cause the process to exit with code `-1`.
+/// Panics during execution are logged but handled by the supervision tree.
+///
+/// [`SHUTDOWN_TIMEOUT`]: consts::SHUTDOWN_TIMEOUT
 pub fn block_on<F>(future: F) -> !
 where
   F: Future<Output = ()> + Send + 'static,
@@ -107,6 +143,7 @@ where
   process::exit(consts::E_CODE_SUCCESS);
 }
 
+/// Builds the global tracing subscriber configuration.
 fn build_tracing() -> FmtSubscriber {
   FmtSubscriber::builder()
     .log_internal_errors(true)
@@ -120,6 +157,7 @@ fn build_tracing() -> FmtSubscriber {
     .finish()
 }
 
+/// Builds the Tokio multi-threaded runtime with Errai configuration.
 fn build_runtime() -> Result<Runtime, Error> {
   // TODO: Maybe try and make use of the following hooks:
   //   - on_after_task_poll
@@ -144,6 +182,11 @@ fn build_runtime() -> Result<Runtime, Error> {
     .build()
 }
 
+/// Returns the number of available CPU cores.
+///
+/// Falls back to [`DEFAULT_PARALLELISM`] if CPU detection fails.
+///
+/// [`DEFAULT_PARALLELISM`]: consts::DEFAULT_PARALLELISM
 fn available_cpus() -> usize {
   match thread::available_parallelism() {
     Ok(count) => count.get(),
@@ -151,14 +194,28 @@ fn available_cpus() -> usize {
   }
 }
 
+/// Atomically increments and returns the next worker thread ID.
 fn next_worker_id() -> u32 {
   WORKER_ID.fetch_add(1, Ordering::SeqCst)
 }
 
+/// Generates a unique name for the next worker thread.
+///
+/// Thread names follow the pattern: `errai-worker-N` where N is a
+/// monotonically increasing counter.
 fn next_worker_name() -> String {
   format!("errai-worker-{}", next_worker_id())
 }
 
+/// Spawns the root supervisor process.
+///
+/// The root process supervises the application process and initiates
+/// shutdown when it terminates.
+///
+/// # Panics
+///
+/// Exits the process if the shutdown channel is closed unexpectedly,
+/// indicating a critical runtime failure.
 fn spawn_root_process<F>(future: F, shutdown: Sender<()>) -> InternalPid
 where
   F: Future<Output = ()> + Send + 'static,
@@ -168,37 +225,34 @@ where
 
     tracing::trace!(pid = %this, "Enter Root Process");
 
-    // We *must* trap exits to ensure we forward shutdown signals to the parent.
+    // Trap exit signals to detect application termination
     Process::set_flag(ProcessFlags::TRAP_EXIT, true);
 
-    // Register *this* process because it's important...
+    // Register for identification and debugging
     Process::register(this, "$__ERTS_ROOT");
 
     tracing::trace!(pid = %this, "Spawn Application Process");
 
-    // Spawn the main process to do whatever the caller wanted to do.
-    //
-    // The process is linked to *this* process since we rely on the delivery
-    // of exit signals for a clean shutdown.
+    // Spawn the application process with a link for supervision
     let application: InternalPid = Process::spawn_link(future);
 
     tracing::trace!(pid = %this, "Start Runloop");
 
-    // Block and wait for an exit signal
+    // Wait for application exit signal
     'run: loop {
       match Process::receive_any().await {
         DynMessage::Term(_term) => {
-          // Ignore messages here, we poll and drop terms to keep the queue small.
+          // Discard regular messages to prevent queue buildup
         }
         DynMessage::Exit(exit) if exit.from() == application => {
           tracing::info!(?exit, "Runtime shutdown initialized");
           break 'run;
         }
         DynMessage::Exit(_exit) => {
-          // We only care about exit messages sent from the app process.
+          // Ignore exits from other processes
         }
         DynMessage::Down(_down) => {
-          // We don't care about monitor messages.
+          // Ignore monitor down messages
         }
       }
     }

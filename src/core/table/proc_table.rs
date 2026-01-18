@@ -1,3 +1,52 @@
+//! Lock-free process table for concurrent process storage and lookup.
+//!
+//! This module provides [`ProcTable`], a high-performance, lock-free table
+//! for storing process data. The table is optimized for concurrent access
+//! with cache-line-aware layout to minimize false sharing.
+//!
+//! # Architecture
+//!
+//! The table uses a two-level slot allocation scheme:
+//!
+//! 1. **Abstract indices**: Virtual slot numbers managed via atomic counters
+//! 2. **Real indices**: Physical memory locations in cache-line-aligned blocks
+//!
+//! This separation enables lock-free allocation while maintaining cache efficiency.
+//!
+//! # Slot States
+//!
+//! Each slot is a tagged pointer with three states:
+//!
+//! - `FREE` (0b00): Slot contains valid data and can be accessed
+//! - `USED` (0b01): Slot is temporarily locked during read/remove operations
+//! - `DEAD` (0b10): Slot has been logically removed
+//!
+//! # Concurrency Model
+//!
+//! - **Insertion**: Lock-free via atomic counter and compare-exchange
+//! - **Removal**: Lock-free with spinlock on individual slots
+//! - **Lookup**: Lock-free with spinlock on individual slots
+//! - **Iteration**: Snapshot-based, not affected by concurrent modifications
+//!
+//! # Memory Layout
+//!
+//! Entries are organized into cache-line-sized blocks to reduce contention:
+//!
+//! ```text
+//! ┌───────────┐
+//! │ 0 4  8 12 │ Cache Line (Block 0)
+//! ├───────────┤
+//! │ 1 5  9 13 │ Cache Line (Block 1)
+//! ├───────────┤
+//! │ 2 6 10 14 │ Cache Line (Block 2)
+//! ├───────────┤
+//! │ 3 7 11 15 │ Cache Line (Block 3)
+//! └───────────┘
+//! ```
+//!
+//! Sequential allocation spreads entries across blocks, with each block
+//! residing in its own cache line.
+
 use crossbeam_utils::CachePadded;
 use std::alloc::Layout;
 use std::alloc::alloc;
@@ -34,7 +83,10 @@ use crate::tyre::ptr::TaggedPtr;
 // Table Full Error
 // -----------------------------------------------------------------------------
 
-/// Error returned by [`ProcTable::insert`].
+/// Error returned when the process table has reached its capacity.
+///
+/// This error occurs when attempting to insert a process into a full table.
+/// The table capacity is fixed at creation time and cannot be expanded.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ProcTableFull;
@@ -51,6 +103,12 @@ impl Error for ProcTableFull {}
 // Table Keys Iterator
 // -----------------------------------------------------------------------------
 
+/// Iterator over the PIDs of currently allocated processes in a [`ProcTable`].
+///
+/// This iterator provides a snapshot view of allocated PIDs at the time
+/// iteration begins. Concurrent insertions or removals do not invalidate
+/// the iterator, though yielded PIDs may refer to processes that have
+/// since been removed.
 pub struct ProcTableKeys<'a, T> {
   table: &'a ProcTable<T>,
   index: usize,
@@ -103,96 +161,49 @@ impl<'a, T> Iterator for ProcTableKeys<'a, T> {
 // Process Table
 // -----------------------------------------------------------------------------
 
-/// Cache-Line-Aware Lock-Free Process Table
+/// Lock-free, cache-line-aware process table storing [`Arc<T>`] entries.
 ///
-/// A fixed-capacity, lock-free table for storing pointers to processes,
-/// optimized for concurrent access and cache-friendly memory layout.
+/// This table provides concurrent insertion, removal, and lookup of process
+/// entries without traditional locks. Each operation uses atomic primitives
+/// and tagged pointers to ensure thread safety.
 ///
-/// ## Guarantees
+/// # Capacity
 ///
-/// - Lock-free insertion, removal, and lookup
-/// - Starvation-resistant slot allocation and recycling
-/// - Readers always observe fully initialized entries (no torn reads)
-/// - Cache-friendly layout minimizes false sharing
-/// - Strict memory ordering guarantees (Acquire/Release/AcqRel)
+/// Table capacity is fixed at creation time and must be between
+/// [`MIN_ENTRIES`] and [`MAX_ENTRIES`]. Capacity is automatically rounded
+/// to the next power of two.
 ///
-/// ## Memory Model
+/// # Thread Safety
 ///
-/// - **Insertion**: Initialize `Arc<T>`, then store in the table with a `Release` store.
-/// - **Lookup**: Load entry using `Acquire` ordering, ensuring visibility of all writes.
-/// - **Removal**: Atomically mark entry as `DEAD` with `AcqRel` ordering. Entries in `DEAD` state
-///   are not returned to readers.
-/// - **Slot Recycling**: Monotonic atomic counters (`aid`, `fid`) manage slot reservation and reuse,
-///   ensuring visibility of generation updates using `Acquire` and `Release` ordering.
+/// All operations are safe to call concurrently from multiple threads:
 ///
-/// ## Safety and Invariants
+/// - **Readers** never block writers or other readers
+/// - **Writers** coordinate only on the specific slot being modified
+/// - **No global locks** are used for normal operations
 ///
-/// - The table must not be dropped while threads may access it.
-/// - Tagged pointers must never be dereferenced directly. They are used to encode the state of slots.
+/// # Memory Ordering
 ///
-/// ### Tagged Pointer Invariants
+/// The table uses specific atomic orderings for different operations:
 ///
-/// - **Tags**: Entries store raw pointers with the low-order bits used as tags:
-///   - `0b00`: FREE (slot is available for insertion)
-///   - `0b01`: USED (slot is in use)
-///   - `0b10`: DEAD (slot is logically removed)
+/// - **Relaxed**: Used for counters where only atomicity matters (no cross-thread visibility needed)
+/// - **Acquire**: Loads that need to see all prior writes to the slot
+/// - **Release**: Stores that make all prior writes visible to other threads
+/// - **AcqRel**: Operations that both load previous state and make writes visible
 ///
-/// - Operations on tagged pointers must adhere to:
-///   - `TaggedPtr::with(ptr, tag)`: Preserves the original pointer in non-tag bits.
-///   - `TaggedPtr::tag(ptr)`: Returns only tag bits.
-///   - `TaggedPtr::del(ptr)`: Retrieves the original `Arc<T>` data pointer.
-///   - **Violated Invariants**: Dereferencing tagged pointers without untagging or improperly
-///     modifying the tag bits leads to undefined behavior.
+/// # Examples
 ///
-/// ## Arc Lifetime Safety
+/// ```
+/// use errai::core::ProcTable;
 ///
-/// - Every entry holds an `Arc<T>`, ensuring safe memory management and preventing use-after-free.
-///   The **Arc's reference counting** ensures that the memory for the stored process is properly
-///   deallocated when no longer needed, while preventing data races.
+/// let table = ProcTable::<u64>::with_capacity(1024);
 ///
-/// ## Concurrency and Synchronization
-///
-/// - The table supports **lock-free** concurrent access by multiple threads.
-/// - **Insertion**, **lookup**, and **removal** operations are atomic, ensuring that threads can operate
-///   without locks while maintaining correctness. This lock-free design prevents deadlocks and reduces
-///   contention in high-concurrency scenarios.
-/// - The **volatile section** is designed to minimize false sharing and ensures efficient concurrent access
-///   by frequently updated atomics, while the **read-only section** contains static data that's not modified
-///   after initialization.
-///
-/// ## Layout (Maintainer Reference)
-///
-/// The table is divided into two cache-line-aligned sections:
-///
-/// - **Volatile Section**: Contains atomic counters and frequently updated atomics for slot
-///   reservation and tracking.
-/// - **Read-only Section**: Contains static metadata and storage pointers, which are not modified
-///   after initialization.
-///
-/// Entries are organized into **cache-line-sized blocks**:
-/// - Each block contains multiple **slots**, each holding an atomic pointer.
-/// - Blocks are allocated contiguously in memory.
-/// - Slot allocation proceeds sequentially through blocks, with a generation counter used to
-///   track slot reuse across blocks.
-///
-/// ### Visual Representation
-///
-/// Example table with 4 blocks and 4 slots per block:
-///
-/// ```text
-/// ┌───────────┐
-/// │ 0 4  8 12 │ Cache Line
-/// ├───────────┤
-/// │ 1 5  9 13 │ Cache Line
-/// ├───────────┤
-/// │ 2 6 10 14 │ Cache Line
-/// ├───────────┤
-/// │ 3 7 11 15 │ Cache Line
-/// └───────────┘
+/// // Check capacity
+/// assert!(table.capacity() >= 1024);
+/// assert!(table.is_empty());
 /// ```
 ///
-/// - Boxes represent blocks, and numbers represent logical slot indices.
-/// - Sequentially inserted entries fill slots across blocks, wrapping around when full.
+/// [`MIN_ENTRIES`]: Self::MIN_ENTRIES
+/// [`MAX_ENTRIES`]: Self::MAX_ENTRIES
 #[repr(C)]
 pub struct ProcTable<T> {
   volatile: CachePadded<Volatile>,
@@ -203,24 +214,37 @@ impl<T> ProcTable<T> {
   /// Minimum number of entries supported in the table.
   pub const MIN_ENTRIES: usize = 1 << 4;
 
-  // Maximum number of entries supported in the table.
+  /// Maximum number of entries supported in the table.
   pub const MAX_ENTRIES: usize = 1 << 27;
 
-  /// Default number of entries supported in the table.
+  /// Default number of entries in a new table.
   #[cfg(not(test))]
   pub const DEF_ENTRIES: usize = 1 << 20;
   #[cfg(test)]
   pub const DEF_ENTRIES: usize = 1 << 10;
 
-  /// Creates a new, empty `ProcTable` with the default capacity.
+  /// Creates a new, empty table using the default capacity.
   #[inline]
   pub fn new() -> Self {
     Self::with_capacity(Self::DEF_ENTRIES)
   }
 
-  /// Creates a new, empty `ProcTable` with at least the specified capacity.
+  /// Creates a new, empty table with at least `capacity` slots.
   ///
-  /// The table will not reallocate, and will hold at least `capacity` entries.
+  /// The actual capacity will be rounded up to the next power of two and
+  /// clamped between [`MIN_ENTRIES`] and [`MAX_ENTRIES`].
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use errai::core::ProcTable;
+  ///
+  /// let table = ProcTable::<u64>::with_capacity(1000);
+  /// assert_eq!(table.capacity(), 1024);  // Rounded to power of two
+  /// ```
+  ///
+  /// [`MIN_ENTRIES`]: Self::MIN_ENTRIES
+  /// [`MAX_ENTRIES`]: Self::MAX_ENTRIES
   pub fn with_capacity(capacity: usize) -> Self {
     Self::alloc_table(capacity)
   }
@@ -231,32 +255,35 @@ impl<T> ProcTable<T> {
     self.readonly.cap.get()
   }
 
-  /// Returns the number of entries currently in the table.
+  /// Returns the total number of entries currently allocated in the table.
+  ///
+  /// This value may change immediately after reading due to concurrent
+  /// operations in other threads.
   #[inline]
   pub fn len(&self) -> usize {
     self.volatile.len.load(Relaxed) as usize
   }
 
-  /// Returns `true` if the table contains no entries.
+  /// Returns `true` if the table currently contains no entries.
   #[inline]
   pub fn is_empty(&self) -> bool {
     self.len() == 0
   }
 
-  /// Adds a new entry to the table, returning an `Arc<T>` to the added entry.
+  /// Inserts a new entry into the table and returns a shared [`Arc<T>`].
   ///
-  /// The provided `init` function is called to initialize the new entry
-  /// **after** space for it has been reserved.
+  /// The `init` function is called with a [`MaybeUninit<T>`] and the assigned
+  /// PID. It must fully initialize the value before returning.
   ///
-  /// # Requirements for the `init` function:
+  /// # Requirements for `init`
   ///
-  /// - Must never fail; failure results in a permanently lost slot.
-  /// - Avoid heavy computation or recursive table calls to prevent deadlocks.
-  /// - Must fully initialize the `MaybeUninit<T>` before returning.
+  /// - **Must** fully initialize the [`MaybeUninit<T>`] before returning
+  /// - **Must not** panic (panics may permanently leak a slot)
+  /// - **Should** avoid heavy computation or recursive table operations
   ///
   /// # Errors
   ///
-  /// Returns [`ProcTableFull`] if the table has reached its maximum capacity.
+  /// Returns [`ProcTableFull`] if the table has reached maximum capacity.
   #[inline]
   pub fn insert<F>(&self, init: F) -> Result<Arc<T>, ProcTableFull>
   where
@@ -265,36 +292,32 @@ impl<T> ProcTable<T> {
     self.do_insert(init)
   }
 
-  /// Removes and returns the entry associated with the given `pid`,
-  /// or `None` if not found.
+  /// Removes the entry associated with `pid` and returns it if present.
   ///
-  /// This method may remove a previously inserted entry at the same slot if the
-  /// `pid` matches an older entry. This behavior is safe but may be surprising
-  /// to some users. The method ensures that the entry is either fully removed
-  /// or returned if still valid.
+  /// The slot becomes available for reuse after removal. If multiple threads
+  /// attempt to remove the same PID, only one will succeed.
   pub fn remove(&self, pid: InternalPid) -> Option<Arc<T>> {
     self.do_remove(pid, self.readonly.pid_to_real_index(pid))
   }
 
-  /// Checks if an existing entry is associated with the given `pid` and not
-  /// marked for removal.
+  /// Returns `true` if an entry exists for the given `pid`.
   ///
-  /// Note: This function checks the entry's existence, but it does **not**
-  /// guarantee that the entry will remain valid after the call returns. Users
-  /// should not assume the entry remains available.
+  /// The result may be stale immediately after returning due to concurrent
+  /// operations.
   #[inline]
   pub fn exists(&self, pid: InternalPid) -> bool {
     self.do_exists(self.readonly.pid_to_real_index(pid))
   }
 
-  /// Retrieves the entry associated with the given `pid`, if it exists and is
-  /// not marked for removal.
+  /// Returns the entry associated with `pid`, if it exists.
+  ///
+  /// The returned [`Arc<T>`] can be safely shared across threads.
   #[inline]
   pub fn get(&self, pid: InternalPid) -> Option<Arc<T>> {
     self.do_get(self.readonly.pid_to_real_index(pid))
   }
 
-  /// Checks if an entry exists at the given `index` and is not marked for removal.
+  /// Returns `true` if a slot exists at the given base `index`.
   #[inline]
   pub fn has(&self, index: usize) -> bool {
     if index < self.capacity() {
@@ -304,14 +327,18 @@ impl<T> ProcTable<T> {
     }
   }
 
-  /// Returns an iterator over all the keys (PIDs) currently in the table.
+  /// Returns an iterator over all currently allocated PIDs.
+  ///
+  /// The iterator provides a snapshot view and is not invalidated by
+  /// concurrent modifications.
   #[inline]
   pub fn keys(&self) -> ProcTableKeys<'_, T> {
     ProcTableKeys::new(self)
   }
 
-  /// Translates the given `pid` into a 2-tuple containing the `number` and
-  /// `serial` components.
+  /// Translates a PID into its `(number, serial)` components.
+  ///
+  /// This is useful for displaying PIDs or integrating with external systems.
   #[inline]
   pub fn translate_pid(&self, pid: InternalPid) -> (u32, u32) {
     fn bits(value: u64, start: u32, count: u32) -> u64 {
@@ -341,10 +368,8 @@ impl<T> Drop for ProcTable<T> {
     let memory: usize = strict_align(self.capacity().strict_mul(ENTRY_SIZE));
     let layout: Layout = Layout::from_size_align(memory, CACHE_LINE).expect("valid layout");
 
-    // SAFETY: The `ptr_concrete` and `ptr_abstract` pointers are guaranteed to
-    //         be valid, as they are both allocated using the internal `alloc`
-    //         function. The `dealloc_*` functions are therefore safe as we use
-    //         the same computed layout to deallocate.
+    // SAFETY: Both pointers were allocated by `alloc_table` using this layout.
+    //         We're the sole owner at drop time, so deallocation is safe.
     unsafe {
       Self::dealloc_concrete_array(layout, self.readonly.ptr_concrete);
       Self::dealloc_abstract_array(layout, self.readonly.ptr_abstract);
@@ -392,10 +417,8 @@ impl<T> ProcTable<T> {
     // -------------------------------------------------------------------------
 
     'reserve: {
-      // Relaxed ensures that the atomic increment of len happens atomically,
-      // but there are no guarantees about synchronization or visibility with
-      // respect to other operations. This is fine as we only care about
-      // atomicity here.
+      // Relaxed: We only need atomicity for the increment, not cross-thread
+      // visibility. The capacity check doesn't require synchronization.
       let count: u32 = self.volatile.len.fetch_add(1, Relaxed);
 
       if count < self.capacity() as u32 {
@@ -404,10 +427,8 @@ impl<T> ProcTable<T> {
 
       let mut count: u32 = count + 1;
 
-      // Relaxed orderings are used for both `compare_exchange` operations. This
-      // is valid as we're only concerned with atomicity, not visibility or
-      // synchronization between threads. We don't need to enforce any memory
-      // ordering across threads here.
+      // Relaxed: If we exceed capacity, we undo the increment. We only need
+      // atomicity for the compare-exchange, not memory ordering.
       'undo: while let Err(next) =
         self
           .volatile
@@ -435,15 +456,13 @@ impl<T> ProcTable<T> {
     // -------------------------------------------------------------------------
 
     let base_index: u64 = 'acquire: loop {
-      // Relaxed ensures that the increment operation is atomic, but there are
-      // no memory ordering guarantees. This is acceptable since no
-      // synchronization or visibility between threads is needed.
+      // Relaxed: We only need atomicity for getting the next slot index.
+      // The reservation system ensures we don't collide.
       let base_index: u64 = self.volatile.aid.fetch_add(1, Relaxed);
       let real_index: Index<'_, T> = self.readonly.base_index_to_real_index(base_index);
 
-      // AcqRel ensures that any memory operations before the swap are visible
-      // to the thread performing the swap (acquire). It also ensures that any
-      // changes after the swap will be visible to other threads (release).
+      // AcqRel: We need to see if the slot is reserved (Acquire) and make
+      // our reservation visible to others (Release).
       let atomic: &AtomicU64 = self.readonly.get_abstract(real_index);
       let result: u64 = atomic.swap(RESERVED, AcqRel);
 
@@ -471,13 +490,15 @@ impl<T> ProcTable<T> {
     // 5. Write Entry
     // -------------------------------------------------------------------------
 
-    // SAFETY: `uninit` was initialized by the provided `init` function.
+    // SAFETY: `uninit` was initialized by the provided `init` function,
+    //         which is required to fully initialize the value.
     let data_unique: UniqueArc<T> = unsafe { UniqueArc::assume_init(uninit) };
     let data_shared: Arc<T> = UniqueArc::shareable(data_unique);
 
     let slot: &AtomicTaggedPtr<T> = self.readonly.get_concrete(real_index);
     let heap: *mut T = Arc::into_raw(Arc::clone(&data_shared)).cast_mut();
-    // SAFETY: The alignment of `TaggedPtr<T>` was asserted during setup.
+
+    // SAFETY: Pointer alignment was verified during table setup.
     let item: TaggedPtr<T> = unsafe { TaggedPtr::with_unchecked(heap, PTR_TAG_FREE) };
 
     debug_assert!(
@@ -490,10 +511,8 @@ impl<T> ProcTable<T> {
       "ProcTable::do_get requires that the pointer is aligned",
     );
 
-    // Release ensures that all prior memory operations (like initializing the
-    // entry) are visible to other threads once this operation is complete. This
-    // is crucial to ensure that any writes to the table entry are visible
-    // before marking it as free.
+    // Release: Make the initialized entry visible to all other threads.
+    // Anyone who Acquires this slot will see the fully initialized data.
     slot.store(item, Release);
 
     // -------------------------------------------------------------------------
@@ -524,9 +543,7 @@ impl<T> ProcTable<T> {
       // 1. Load Entry
       // -----------------------------------------------------------------------
 
-      // Acquire ensures that all memory operations before the load are visible
-      // to the current thread. This guarantees that we are reading the most
-      // up-to-date value.
+      // Acquire: Ensure we see the latest state of the slot.
       let item: TaggedPtr<T> = slot.load(Acquire);
 
       // -----------------------------------------------------------------------
@@ -546,9 +563,7 @@ impl<T> ProcTable<T> {
       // 3. Lock Entry
       // -----------------------------------------------------------------------
 
-      // AcqRel ensures that prior operations (like marking the entry as free)
-      // are visible before this exchange happens. Acquire ensures that
-      // subsequent reads after the exchange will see the updated entry.
+      // AcqRel: See the current FREE state (Acquire) and make our lock visible (Release).
       let lock: Result<TaggedPtr<T>, TaggedPtr<T>> =
         slot.compare_exchange(item, item.set(PTR_TAG_USED), AcqRel, Acquire);
 
@@ -579,15 +594,11 @@ impl<T> ProcTable<T> {
       );
 
       'release: loop {
-        // Relaxed ensures that the increment operation is atomic, but there are
-        // no memory ordering guarantees. This is acceptable since no
-        // synchronization or visibility between threads is needed.
+        // Relaxed: We only need atomicity for claiming the next free slot.
         let base_index: u64 = self.volatile.fid.fetch_add(1, Relaxed);
         let real_index: Index<'_, T> = self.readonly.base_index_to_real_index(base_index);
 
-        // Relaxed ensures atomicity of the comparison and exchange without
-        // imposing synchronization between threads. Since we're only updating
-        // the state of the slot, no additional ordering is necessary.
+        // Relaxed: We're just updating the free list, no synchronization needed.
         let atomic: &AtomicU64 = self.readonly.get_abstract(real_index);
         let result: Result<u64, u64> = atomic.compare_exchange(RESERVED, data, Relaxed, Relaxed);
 
@@ -601,9 +612,7 @@ impl<T> ProcTable<T> {
         "ProcTable::do_remove requires that length is > 0",
       );
 
-      // Release ensures that all memory operations before this operation are
-      // visible to other threads after the decrement. This is important to
-      // ensure visibility of the decrement operation after the length change.
+      // Release: Make the length decrement visible to all threads.
       let _update_len: u32 = self.volatile.len.fetch_sub(1, Release);
 
       // -----------------------------------------------------------------------
@@ -620,17 +629,14 @@ impl<T> ProcTable<T> {
         "ProcTable::do_remove requires that the pointer is aligned",
       );
 
-      // SAFETY: `ptr` is derived from a valid `Arc<T>` and assumed to be properly initialized.
+      // SAFETY: The pointer was created from a valid Arc during insertion.
       let data_source: Arc<T> = unsafe { Arc::from_raw(item.as_ptr()) };
 
       // -----------------------------------------------------------------------
       // 6. Delete Entry
       // -----------------------------------------------------------------------
 
-      // Release ensures that all prior memory operations (like marking the
-      // entry for removal) are visible to other threads once the store
-      // completes. This ensures that other threads see the removal after the
-      // store finishes, but no memory ordering is imposed after the store.
+      // Release: Make the null write visible to all threads.
       slot.store(TaggedPtr::null(), Release);
 
       // -----------------------------------------------------------------------
@@ -651,9 +657,7 @@ impl<T> ProcTable<T> {
     // 1. Load Slot/Entry
     // -------------------------------------------------------------------------
 
-    // Acquire ensures that any operations before the load (such as marking the
-    // entry for removal) are visible to the current thread. This guarantees
-    // that we load the most up-to-date state.
+    // Acquire: Ensure we see the latest state of the slot.
     let slot: &AtomicTaggedPtr<T> = self.readonly.get_concrete(index);
     let item: TaggedPtr<T> = slot.load(Acquire);
 
@@ -693,9 +697,7 @@ impl<T> ProcTable<T> {
       // 1. Load Entry
       // -----------------------------------------------------------------------
 
-      // Acquire ensures that any prior memory operations are visible to the
-      // current thread before the load. This guarantees the load is consistent
-      // with other threads' modifications.
+      // Acquire: Ensure we see the latest slot state.
       let item: TaggedPtr<T> = slot.load(Acquire);
 
       // -----------------------------------------------------------------------
@@ -715,9 +717,7 @@ impl<T> ProcTable<T> {
       // 3. Lock Entry
       // -----------------------------------------------------------------------
 
-      // AcqRel ensures visibility of prior memory operations, like marking the
-      // entry as free. Acquire ensures that any subsequent reads will see the
-      // updated state of the entry after the exchange.
+      // AcqRel: See the current FREE state (Acquire) and make our lock visible (Release).
       let lock: Result<TaggedPtr<T>, TaggedPtr<T>> =
         slot.compare_exchange(item, item.set(PTR_TAG_USED), AcqRel, Acquire);
 
@@ -745,7 +745,7 @@ impl<T> ProcTable<T> {
         "ProcTable::do_get requires that the pointer is aligned",
       );
 
-      // SAFETY: `ptr` is derived from a valid `Arc<T>` and assumed to be properly initialized.
+      // SAFETY: The pointer was created from a valid Arc during insertion.
       let data_source: Arc<T> = unsafe { Arc::from_raw(item.as_ptr()) };
       let data_shared: Arc<T> = Arc::clone(&data_source);
 
@@ -754,15 +754,14 @@ impl<T> ProcTable<T> {
         "ProcTable::do_get requires that the refcount is > 1",
       );
 
-      // Use `ManuallyDrop` to avoid dropping the `Arc<T>` prematurely.
+      // Prevent dropping the Arc we just reconstructed, as the table still owns it.
       let _avoid_drop: ManuallyDrop<Arc<T>> = ManuallyDrop::new(data_source);
 
       // -----------------------------------------------------------------------
       // 5. Unlock Entry
       // -----------------------------------------------------------------------
 
-      // Relaxed is used here as we are only concerned with atomicity. No
-      // synchronization is needed between threads after this store.
+      // Relaxed: We're just clearing the lock bit. The Arc clone is already done.
       slot.store(item.set(PTR_TAG_FREE), Relaxed);
 
       // -----------------------------------------------------------------------
@@ -779,7 +778,7 @@ impl<T> ProcTable<T> {
     data += self.capacity() as u64;
     data &= !(!0_u64 << InternalPid::PID_BITS);
 
-    // Ensure we never stored invalid data.
+    // Ensure we never store the reserved marker value.
     if data == RESERVED {
       data += self.capacity() as u64;
       data &= !(!0_u64 << InternalPid::PID_BITS);
@@ -867,7 +866,7 @@ impl<T> ProcTable<T> {
     // To fix this without spreading complexity throughout the implementation,
     // we increment the table `len` field to permanently reserve one slot.
     //
-    // The end result is a table that wastes one slot but that's not too bad...
+    // The end result is a table that wastes one slot but simplifies the code.
     let len: u32 = u32::from(cap.get() == Self::MAX_ENTRIES);
 
     // -------------------------------------------------------------------------
@@ -903,15 +902,13 @@ impl<T> ProcTable<T> {
   fn alloc_concrete_array(layout: Layout, count: NonZeroUsize) -> NonNull<AtomicTaggedPtr<T>> {
     assert!(layout.size() > 0, "layout size must be non-zero");
 
-    // SAFETY: We just ensured that `layout` has a non-zero size.
+    // SAFETY: Layout has non-zero size, verified above.
     let ptr: NonNull<AtomicTaggedPtr<T>> = unsafe { Self::alloc(layout) };
 
-    // Initialize all data atomics with a NULL ptr.
+    // Initialize all slots with null pointers.
     for offset in 0..count.get() {
-      // SAFETY: The iteration guarantees we are in the bounds of the allocation,
-      //         therefore we satisfy all requirements of `add`. The final
-      //         destination pointer is valid for writes as we've satisfied all
-      //         requirements at earlier stages.
+      // SAFETY: The offset is within bounds of the allocation (0..count).
+      //         The pointer is properly aligned and valid for writes.
       unsafe {
         ptr.add(offset).write(AtomicTaggedPtr::null());
       }
@@ -924,12 +921,12 @@ impl<T> ProcTable<T> {
   fn alloc_abstract_array(layout: Layout, blocks: NonZeroUsize) -> NonNull<AtomicU64> {
     assert!(layout.size() > 0, "layout size must be non-zero");
 
-    // SAFETY: We just ensured that `layout` has a non-zero size.
+    // SAFETY: Layout has non-zero size, verified above.
     let ptr: NonNull<AtomicU64> = unsafe { Self::alloc(layout) };
 
     let mut offset: usize = 0;
 
-    // Initialize all atomics with a pre-computed cache-line slot.
+    // Initialize the abstract index mapping with cache-line-aware layout.
     for block in 0..blocks.get() {
       for index in 0..SLOT_COUNT {
         let value: u64 = index
@@ -938,12 +935,8 @@ impl<T> ProcTable<T> {
           .try_into()
           .expect("valid default slot value");
 
-        // SAFETY: The table array is arranged as cache line-sized blocks of
-        //         slots; the forumla to determine this here is `blocks * SLOT_COUNT`.
-        //         Since we are guaranteed to stay in the bounds of the
-        //         allocation, we satisfy all requirements of `add`. The final
-        //         destination pointer is valid for writes as we've satisfied
-        //         all requirements at earlier stages.
+        // SAFETY: Total slots = blocks * SLOT_COUNT. We iterate exactly that many
+        //         times, so offset stays in bounds. Pointer is aligned and valid.
         unsafe {
           ptr.add(offset).write(AtomicU64::new(value));
         }
@@ -955,22 +948,28 @@ impl<T> ProcTable<T> {
     ptr
   }
 
-  /// Deallocate the concrete array at the given `ptr` with the given `layout`.
+  /// Deallocate the concrete array.
   ///
   /// # Safety
   ///
-  /// See [`Self::dealloc`] for invariants to uphold.
+  /// - `ptr` must have been allocated via [`alloc_concrete_array`]
+  /// - `layout` must match the layout used during allocation
+  ///
+  /// [`alloc_concrete_array`]: Self::alloc_concrete_array
   #[inline]
   unsafe fn dealloc_concrete_array(layout: Layout, ptr: NonNull<AtomicTaggedPtr<T>>) {
     // SAFETY: This is guaranteed to be safe by the caller.
     unsafe { Self::dealloc(layout, ptr) }
   }
 
-  /// Deallocate the abstract array at the given `ptr` with the given `layout`.
+  /// Deallocate the abstract array.
   ///
   /// # Safety
   ///
-  /// See [`Self::dealloc`] for invariants to uphold.
+  /// - `ptr` must have been allocated via [`alloc_abstract_array`]
+  /// - `layout` must match the layout used during allocation
+  ///
+  /// [`alloc_abstract_array`]: Self::alloc_abstract_array
   #[inline]
   unsafe fn dealloc_abstract_array(layout: Layout, ptr: NonNull<AtomicU64>) {
     // SAFETY: This is guaranteed to be safe by the caller.
@@ -992,15 +991,13 @@ impl<T> ProcTable<T> {
     ptr.cast()
   }
 
-  /// Deallocates the block of memory at the given `ptr` with the given `layout`.
+  /// Deallocates the block of memory at the given `ptr`.
   ///
   /// # Safety
   ///
-  /// The caller must ensure:
-  ///
-  /// - `ptr` is a block of memory currently allocated via [`Self::alloc`] and,
-  ///
-  /// - `layout` is the same layout that was used to allocate that block of memory.
+  /// - `ptr` must have been allocated via [`Self::alloc`] with `layout`
+  /// - `layout` must be the same layout used during allocation
+  /// - `ptr` must not be used after this call
   #[inline]
   unsafe fn dealloc<A>(layout: Layout, ptr: NonNull<A>) {
     // SAFETY: This is guaranteed to be safe by the caller.
@@ -1012,10 +1009,10 @@ impl<T> ProcTable<T> {
 // Misc. Constants
 // -----------------------------------------------------------------------------
 
-/// Slot reservation marker.
+/// Slot reservation marker indicating the slot is being allocated or freed.
 const RESERVED: u64 = u64::MAX;
 
-/// The assumed size of a cache line (in bytes).
+/// The assumed size of a cache line in bytes.
 const CACHE_LINE: usize = size_of::<CachePadded<u8>>();
 
 /// The number of bytes required to store a table entry.
@@ -1041,11 +1038,11 @@ const SLOT_COUNT: usize = {
   COUNT
 };
 
-/// The entry is currently unlock and can be read or removed.
+/// Tag indicating the slot is unlocked and contains valid data.
 const PTR_TAG_FREE: u8 = 0b00;
-/// the entry is currently locked for reading.
+/// Tag indicating the slot is temporarily locked during an operation.
 const PTR_TAG_USED: u8 = 0b01;
-/// The entry is currently marked for removal.
+/// Tag indicating the slot has been logically removed.
 const PTR_TAG_DEAD: u8 = 0b10;
 
 // -----------------------------------------------------------------------------
@@ -1076,7 +1073,9 @@ const fn assert_nonzero(value: usize) -> NonZeroUsize {
 // Index
 // -----------------------------------------------------------------------------
 
-/// A type storing a known-valid index into a table array.
+/// A type-safe index into the table arrays.
+///
+/// This type ensures indices are always valid through phantom lifetime.
 #[repr(transparent)]
 struct Index<'a, T> {
   source: u64,
@@ -1126,13 +1125,14 @@ impl<T> PartialEq for Index<'_, T> {
 // Table State - Volatile
 // -----------------------------------------------------------------------------
 
+/// Frequently modified table state stored in a cache-padded section.
 #[repr(C)]
 struct Volatile {
   /// The total number of entries currently in the table.
   len: AtomicU32,
-  /// The id counter of the next available slot to allocate.
+  /// Allocation counter for the next slot to allocate.
   aid: AtomicU64,
-  /// The id counter of the next available slot to free.
+  /// Free counter for the next slot to return to the free list.
   fid: AtomicU64,
 }
 
@@ -1140,15 +1140,19 @@ struct Volatile {
 // Table State - Read-Only
 // -----------------------------------------------------------------------------
 
+/// Static table metadata stored in a cache-padded section.
+///
+/// This data is initialized once and never modified, avoiding cache
+/// line bouncing between threads.
 #[repr(C)]
 struct ReadOnly<T> {
-  /// Pointer to an array of table entry data.
+  /// Pointer to the array of table entries (concrete data).
   ptr_concrete: NonNull<AtomicTaggedPtr<T>>,
-  /// Pointer to an array mapping abstract indices to concrete indices.
+  /// Pointer to the array mapping abstract to concrete indices.
   ptr_abstract: NonNull<AtomicU64>,
   /// The maximum number of entries the table can hold.
   cap: NonZeroUsize,
-  /// Index mapping fields.
+  /// Index mapping masks and shifts for PID translation.
   id_mask_entry: u32,
   id_mask_block: u32,
   id_mask_index: u32,
@@ -1171,16 +1175,12 @@ impl<T> ReadOnly<T> {
     unsafe { self.abstract_unchecked(index.get() as usize) }
   }
 
-  /// Returns a reference to the concrete array entry at `index`,
-  /// without performing any safety checks.
+  /// Returns a reference to the concrete array entry without bounds checking.
   ///
   /// # Safety
   ///
-  /// - `index` must be *less* than the value of [`cap`][Self::cap] and,
-  ///
-  /// - the pointer to the entry at `index` must be [convertible to a reference].
-  ///
-  /// [convertible to a reference]: std::ptr#pointer-to-reference-conversion
+  /// - `index` must be less than `cap`
+  /// - The pointer at `index` must be properly initialized and aligned
   #[inline]
   const unsafe fn concrete_unchecked(&self, index: usize) -> &AtomicTaggedPtr<T> {
     #[cfg(debug_assertions)]
@@ -1192,16 +1192,12 @@ impl<T> ReadOnly<T> {
     unsafe { self.ptr_concrete.add(index).as_ref() }
   }
 
-  /// Returns a reference to the abstract array entry at `index`,
-  /// without performing any safety checks.
+  /// Returns a reference to the abstract array entry without bounds checking.
   ///
   /// # Safety
   ///
-  /// - `index` must be *less* than the value of [`cap`][Self::cap] and,
-  ///
-  /// - the pointer to the entry at `index` must be [convertible to a reference].
-  ///
-  /// [convertible to a reference]: std::ptr#pointer-to-reference-conversion
+  /// - `index` must be less than `cap`
+  /// - The pointer at `index` must be properly initialized and aligned
   #[inline]
   const unsafe fn abstract_unchecked(&self, index: usize) -> &AtomicU64 {
     #[cfg(debug_assertions)]

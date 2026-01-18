@@ -10,11 +10,31 @@ use std::time::Duration;
 
 use crate::erts::Runtime;
 
+/// Global reference counter initialized with timestamp-based seed.
+///
+/// This counter ensures uniqueness across the node's lifetime by combining
+/// timestamp data with a monotonic sequence.
 static GLOBAL_REF: CachePadded<LazyLock<AtomicU64>> = CachePadded::new(LazyLock::new(|| {
   AtomicU64::new(InternalRef::initialize(Runtime::time()))
 }));
 
-/// An internal reference.
+/// Reference uniquely identifying runtime objects on the local node.
+///
+/// Internal references are 96-bit values (3xu32) generated from a monotonic
+/// global counter. The counter is initialized with timestamp data to provide
+/// uniqueness across runtime restarts.
+///
+/// # Format
+///
+/// References display as `#Ref<0.X.Y.Z>` where:
+///
+/// - `0`: Node indicator (local node)
+/// - `X`, `Y`, `Z`: 32-bit components from the counter
+///
+/// # Thread Safety
+///
+/// References are generated atomically from a global counter with relaxed
+/// ordering, providing uniqueness without synchronization overhead.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct InternalRef {
@@ -22,39 +42,48 @@ pub struct InternalRef {
 }
 
 impl InternalRef {
+  /// Bit width for the number field in reference encoding.
   pub(crate) const NUMBER_BITS: u32 = 18;
+
+  /// Bit width for the serial field in reference encoding.
   pub(crate) const SERIAL_BITS: u32 = u32::BITS - Self::NUMBER_BITS;
 
+  /// Bitmask for extracting the number field.
   pub(crate) const NUMBER_MASK: u32 = (1 << Self::NUMBER_BITS) - 1;
+
+  /// Bitmask for extracting the serial field.
   pub(crate) const SERIAL_MASK: u32 = ((1 << Self::SERIAL_BITS) - 1) << Self::NUMBER_BITS;
 
-  /// Creates a new `InternalRef`.
+  /// Creates a new internal reference from the global counter.
   ///
-  /// Note: References are currently implemented using a 64-bit global counter.
-  ///
-  /// Erlang/OTP uses a per-scheduler counter so that's something to consider...
+  /// This is the primary way to generate new references. Each call increments
+  /// the global counter and returns a unique reference.
   #[inline]
   pub(crate) fn new_global() -> Self {
     let global_id: u64 = GLOBAL_REF.fetch_add(1, Ordering::Relaxed);
     let thread_id: u32 = 0;
 
-    Self {
-      bits: Self::pack_bits(global_id, thread_id),
-    }
+    Self::from_bits(Self::pack_bits(global_id, thread_id))
   }
 
-  /// Creates a new `InternalRef` from the given `bits`.
+  /// Creates an internal reference from its raw bits.
+  ///
+  /// This is used for deserialization or when reconstructing references
+  /// from stored data.
   #[inline]
   pub(crate) const fn from_bits(bits: [u32; 3]) -> Self {
     Self { bits }
   }
 
-  /// Converts `self` into raw bits.
+  /// Converts this reference into its raw bits.
+  ///
+  /// This is used for serialization or when storing references in compact form.
   #[inline]
   pub(crate) const fn into_bits(self) -> [u32; 3] {
     self.bits
   }
 
+  /// Packs global counter and thread ID into reference bit layout.
   #[inline]
   fn pack_bits(global_id: u64, thread_id: u32) -> [u32; 3] {
     debug_assert_eq!(thread_id, thread_id & Self::NUMBER_MASK);

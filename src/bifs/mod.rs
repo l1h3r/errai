@@ -1,4 +1,44 @@
-// OTP COMMIT: 11c6025cba47e24950cd4b4fc9f7e9e522388542
+//! Built-in functions implementing core process operations.
+//!
+//! This module contains the internal implementations of all process behavior,
+//! including spawning, messaging, linking, monitoring, and name registration.
+//! These functions are called "BIFs" (Built-In Functions) following Erlang
+//! terminology.
+//!
+//! # Architecture
+//!
+//! BIFs form the layer between the public Process API and the underlying
+//! process management infrastructure. They:
+//!
+//! - Validate arguments and enforce invariants
+//! - Interact with global process and name tables
+//! - Send signals between processes
+//! - Manage process lifecycle
+//!
+//! # Global State
+//!
+//! Two global tables manage process state:
+//!
+//! - [`REGISTERED_PROCS`]: Maps PIDs to process data
+//! - [`REGISTERED_NAMES`]: Maps registered names to PIDs
+//!
+//! These tables are initialized lazily and persist for the runtime's lifetime.
+//!
+//! # BEAM References
+//!
+//! Many functions reference corresponding BEAM (Erlang VM) implementations.
+//! These links are maintained for cross-reference during development and to
+//! aid in understanding expected behavior.
+//!
+//! OTP COMMIT: 11c6025cba47e24950cd4b4fc9f7e9e522388542
+//!
+//! Primary BEAM sources:
+//!
+//! - `erts/emulator/beam/bif.c`
+//! - `erts/emulator/beam/erl_bif_info.c`
+//! - `erts/emulator/beam/register.c`
+//! - `erts/emulator/beam/erl_process_dict.c`
+
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
 use parking_lot::Mutex;
@@ -27,7 +67,6 @@ use crate::core::ProcTable;
 use crate::core::ProcessId;
 use crate::core::Term;
 use crate::core::TimerRef;
-use crate::core::raise;
 use crate::erts::DynMessage;
 use crate::erts::Message;
 use crate::erts::Process;
@@ -48,13 +87,20 @@ use crate::proc::ProcRecv;
 use crate::proc::ProcSend;
 use crate::proc::ProcTask;
 use crate::proc::unbounded_channel;
+use crate::raise;
 use crate::utils::CatchUnwind;
 
-// A table mapping internal process identifiers to process data.
+/// Global process table mapping PIDs to process data.
+///
+/// This table is the authoritative source for all process state. It uses
+/// a lock-free implementation optimized for concurrent access.
 static REGISTERED_PROCS: LazyLock<ProcTable<ProcData>> =
   LazyLock::new(|| ProcTable::with_capacity(consts::MAX_REGISTERED_PROCS));
 
-// A table mapping registered names to internal process identifiers.
+/// Global name registry mapping registered names to PIDs.
+///
+/// Names provide stable addresses for processes. The table uses an RwLock
+/// since name registration is infrequent compared to lookups.
 static REGISTERED_NAMES: LazyLock<RwLock<HashMap<Atom, InternalPid>>> =
   LazyLock::new(|| RwLock::new(HashMap::with_capacity(consts::CAP_REGISTERED_NAMES)));
 
@@ -66,7 +112,12 @@ static REGISTERED_NAMES: LazyLock<RwLock<HashMap<Atom, InternalPid>>> =
 //   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_bif_info.c
 // -----------------------------------------------------------------------------
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L4078
+/// Returns a list of all currently existing process identifiers.
+///
+/// Includes exiting processes (not yet fully terminated). The returned list
+/// is a snapshot and may be stale immediately after returning.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L4078>
 pub(crate) fn process_list() -> Vec<InternalPid> {
   let capacity: usize = REGISTERED_PROCS.len();
   let mut data: Vec<InternalPid> = Vec::with_capacity(capacity);
@@ -78,7 +129,17 @@ pub(crate) fn process_list() -> Vec<InternalPid> {
   data
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L1710
+/// Sends an exit signal to the target process.
+///
+/// The signal is sent unconditionally. The target's handling depends on:
+///
+/// - Exit reason (normal/kill/custom)
+/// - Process flags (trap_exit)
+/// - Whether the process is linked to the sender
+///
+/// Never fails for non-existent PIDs (signals are silently dropped).
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L1710>
 //
 // TODO: Support terminating via reference
 pub(crate) fn process_exit<P>(this: &ProcTask, pid: P, exit: Exit)
@@ -100,29 +161,48 @@ where
   });
 }
 
+/// Checks if a process is alive.
+///
+/// Returns `true` if the process exists and has not started exiting.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_bif_info.c#L3990>
 pub(crate) fn process_alive(_this: &ProcTask, _pid: InternalPid) -> bool {
   todo!("Handle Process Alive")
 }
 
-// BEAM Builtin: N/A
+/// Returns the process flags of the calling process.
+///
+/// BEAM Builtin: N/A
 pub(crate) fn process_get_flags(this: &ProcTask) -> ProcessFlags {
   debug_assert!(!this.internal.is_locked());
   this.internal.lock().flags
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2013
+/// Sets all process flags for the calling process.
+///
+/// Replaces the entire flag set with the provided value.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2013>
 pub(crate) fn process_set_flags(this: &ProcTask, flags: ProcessFlags) {
   debug_assert!(!this.internal.is_locked());
   this.internal.lock().flags = flags;
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2013
+/// Sets a single process flag to the given value.
+///
+/// Other flags remain unchanged.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2013>
 pub(crate) fn process_set_flag(this: &ProcTask, flag: ProcessFlags, value: bool) {
   debug_assert!(!this.internal.is_locked());
   this.internal.lock().flags.set(flag, value);
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_bif_info.c#L1558
+/// Returns detailed information about a process.
+///
+/// Returns `None` if the process is not alive.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_bif_info.c#L1558>
 pub(crate) fn process_info(_this: &ProcTask, _pid: InternalPid) -> Option<ProcessInfo> {
   todo!("Handle Process Info")
 }
@@ -131,6 +211,15 @@ pub(crate) fn process_info(_this: &ProcTask, _pid: InternalPid) -> Option<Proces
 // Spawning & Messaging
 // -----------------------------------------------------------------------------
 
+/// Spawns a new process with the given configuration.
+///
+/// The spawned process:
+///
+/// 1. Executes the provided future
+/// 2. Has its own signal queue and state
+/// 3. May be linked/monitored based on `opts`
+///
+/// Returns a handle containing the PID and optional monitor reference.
 pub(crate) fn process_spawn<F>(this: &ProcTask, opts: SpawnConfig, future: F) -> SpawnHandle
 where
   F: Future<Output = ()> + Send + 'static,
@@ -138,6 +227,10 @@ where
   process_spawn_internal(this.into(), future, opts)
 }
 
+/// Spawns the root supervisor process.
+///
+/// The root process has no parent and is used to supervise the entire
+/// application. It must not be spawned with monitoring enabled.
 pub(crate) fn process_spawn_root<F>(future: F) -> InternalPid
 where
   F: Future<Output = ()> + Send + 'static,
@@ -148,6 +241,18 @@ where
   }
 }
 
+/// Sends a message to the given destination.
+///
+/// # Destination Handling
+///
+/// - **InternalProc**: Sends directly to the PID
+/// - **InternalName**: Resolves name, then sends (raises if unregistered)
+/// - **ExternalProc/ExternalName**: Currently unimplemented
+///
+/// # Error Handling
+///
+/// - Silently drops messages to dead PIDs
+/// - Raises exception for unregistered names
 pub(crate) fn process_send(this: &ProcTask, dest: ExternalDest, term: Term) {
   match dest {
     ExternalDest::InternalProc(pid) => {
@@ -181,6 +286,10 @@ pub(crate) fn process_send(this: &ProcTask, dest: ExternalDest, term: Term) {
   }
 }
 
+/// Receives a message matching type `T` from the mailbox.
+///
+/// Wraps the message in a [`Message`] envelope that may also contain
+/// EXIT or DOWN signals.
 pub(crate) async fn process_receive<T>(pid: InternalPid) -> Message<Box<T>>
 where
   T: 'static,
@@ -188,6 +297,9 @@ where
   ProcMail::receive::<T>(pid).await
 }
 
+/// Receives an exact message of type `T` from the mailbox.
+///
+/// Returns the unwrapped value without the [`Message`] envelope.
 pub(crate) async fn process_receive_exact<T>(pid: InternalPid) -> Box<T>
 where
   T: 'static,
@@ -195,15 +307,39 @@ where
   ProcMail::receive_exact::<T>(pid).await
 }
 
+/// Receives any message from the mailbox without filtering.
 pub(crate) async fn process_receive_any(pid: InternalPid) -> DynMessage {
   ProcMail::receive_any(pid).await
+}
+
+/// Receives a message matching a custom filter function.
+///
+/// The filter is called for each message until one matches.
+pub(crate) async fn process_receive_dyn<F>(pid: InternalPid, filter: F) -> DynMessage
+where
+  F: Fn(&DynMessage) -> bool,
+{
+  ProcMail::receive_dyn(pid, filter).await
 }
 
 // -----------------------------------------------------------------------------
 // Links, Monitors, Aliases
 // -----------------------------------------------------------------------------
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L134
+/// Creates a bidirectional link between the calling process and the target.
+///
+/// # Link Protocol
+///
+/// 1. Check if link already exists (no-op if active, enable if disabled)
+/// 2. Add link to caller's link table
+/// 3. Send LINK signal to target (or LINK_EXIT if target is dead)
+///
+/// # Special Cases
+///
+/// - Self-linking is ignored (no-op)
+/// - Linking to dead process sends immediate LINK_EXIT
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L134>
 pub(crate) fn process_link<P>(this: &ProcTask, pid: P)
 where
   P: ProcessId,
@@ -238,7 +374,22 @@ where
   }
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L1212
+/// Removes a bidirectional link between the calling process and the target.
+///
+/// # Unlink Protocol
+///
+/// 1. Check if link exists (no-op if not)
+/// 2. Disable link with unique ID (prevents exit signal races)
+/// 3. Send UNLINK signal with ID to target
+/// 4. Wait for UNLINK_ACK to complete removal
+///
+/// # Special Cases
+///
+/// - No-op if no link exists
+/// - Immediate removal if target is already dead
+/// - No-op if link is already disabled
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L1212>
 pub(crate) fn process_unlink<P>(this: &ProcTask, pid: P)
 where
   P: ProcessId,
@@ -271,7 +422,25 @@ where
   }
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L753
+/// Establishes a unidirectional monitor on the target.
+///
+/// # Monitor Protocol
+///
+/// 1. Generate unique monitor reference
+/// 2. Add monitor to caller's monitor_send table
+/// 3. Send MONITOR signal to target (or immediate DOWN if dead)
+///
+/// # Name Resolution
+///
+/// For name-based destinations, the name is resolved immediately. If the
+/// name is unregistered, an immediate DOWN message is sent.
+///
+/// # Special Cases
+///
+/// - Self-monitoring returns a reference but is otherwise ignored
+/// - Monitoring dead process sends immediate DOWN
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L753>
 pub(crate) fn process_monitor(this: &ProcTask, item: ExternalDest) -> MonitorRef {
   match item {
     ExternalDest::InternalProc(pid) => {
@@ -329,7 +498,19 @@ pub(crate) fn process_monitor(this: &ProcTask, item: ExternalDest) -> MonitorRef
   }
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L433
+/// Removes a monitor on the target process.
+///
+/// # Demonitor Protocol
+///
+/// 1. Remove monitor from caller's monitor_send table
+/// 2. Send DEMONITOR signal to target (if still alive)
+///
+/// # Special Cases
+///
+/// - No-op if monitor reference doesn't exist
+/// - No-op if target is already dead
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L433>
 pub(crate) fn process_demonitor(this: &ProcTask, mref: MonitorRef) {
   match this.internal.lock().monitor_send.entry(mref) {
     Entry::Occupied(entry) => {
@@ -400,7 +581,28 @@ pub(crate) fn process_timer_read(timer: TimerRef, non_blocking: bool) -> Option<
 //   https://github.com/erlang/otp/blob/master/erts/emulator/beam/register.c
 // -----------------------------------------------------------------------------
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2295
+/// Registers a name for a process.
+///
+/// # Registration Protocol
+///
+/// 1. Validate name (not `undefined`)
+/// 2. Acquire write lock on name table
+/// 3. Check name is not already registered
+/// 4. Check process is alive
+/// 5. Check process doesn't have a registered name
+/// 6. Register name → PID mapping
+/// 7. Set process's registered name
+///
+/// # Panics
+///
+/// Raises exception if:
+///
+/// - Name is `undefined` (reserved)
+/// - Name is already registered
+/// - PID is not alive
+/// - PID already has a registered name
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2295>
 pub(crate) fn process_register(this: &ProcTask, pid: InternalPid, name: Atom) {
   if name == Atom::UNDEFINED {
     raise!(Error, BadArg, "reserved name");
@@ -432,7 +634,23 @@ pub(crate) fn process_register(this: &ProcTask, pid: InternalPid, name: Atom) {
   drop(name_guard);
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2309
+/// Unregisters a name from a process.
+///
+/// # Unregistration Protocol
+///
+/// 1. Acquire write lock on name table
+/// 2. Find PID for name (raise if not found)
+/// 3. Clear process's registered name
+/// 4. Remove name → PID mapping
+///
+/// # Panics
+///
+/// Raises exception if:
+///
+/// - Name is not registered
+/// - PID's registered name doesn't match (inconsistent state)
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2309>
 pub(crate) fn process_unregister(this: &ProcTask, name: Atom) {
   let mut name_guard: RwLockWriteGuard<'_, HashMap<Atom, InternalPid>> = REGISTERED_NAMES.write();
 
@@ -461,12 +679,22 @@ pub(crate) fn process_unregister(this: &ProcTask, name: Atom) {
   drop(name_guard);
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2327
+/// Looks up a PID by registered name.
+///
+/// Returns `None` if the name is not registered. This is a read-only
+/// operation that acquires a read lock.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2327>
 pub(crate) fn process_whereis(name: Atom) -> Option<InternalPid> {
   REGISTERED_NAMES.read().get(&name).copied()
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/register.c#L576
+/// Returns all currently registered names.
+///
+/// Returns a snapshot of registered names. The list may be stale immediately
+/// after returning.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/register.c#L576>
 pub(crate) fn process_registered() -> Vec<Atom> {
   Vec::from_iter(REGISTERED_NAMES.read().keys().copied())
 }
@@ -479,43 +707,65 @@ pub(crate) fn process_registered() -> Vec<Atom> {
 //   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c
 // -----------------------------------------------------------------------------
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L353
+/// Stores a key-value pair in the process dictionary.
+///
+/// Returns the previous value if the key was already set.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L353>
 pub(crate) fn process_dict_put(this: &ProcTask, key: Atom, value: Term) -> Option<Term> {
   debug_assert!(!this.internal.is_locked());
   this.internal.lock().dictionary.insert(key, value)
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L324
+/// Retrieves a value from the process dictionary.
+///
+/// Returns `None` if the key is not set.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L324>
 pub(crate) fn process_dict_get(this: &ProcTask, key: Atom) -> Option<Term> {
   debug_assert!(!this.internal.is_locked());
   this.internal.lock().dictionary.get(&key)
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L373
+/// Deletes a key from the process dictionary.
+///
+/// Returns the previous value if the key was set.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L373>
 pub(crate) fn process_dict_delete(this: &ProcTask, key: Atom) -> Option<Term> {
   debug_assert!(!this.internal.is_locked());
   this.internal.lock().dictionary.remove(&key)
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L363
+/// Clears the entire process dictionary.
+///
+/// Returns all key-value pairs that were stored.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L363>
 pub(crate) fn process_dict_clear(this: &ProcTask) -> Vec<(Atom, Term)> {
   debug_assert!(!this.internal.is_locked());
   this.internal.lock().dictionary.clear()
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L315
+/// Returns all key-value pairs in the process dictionary.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L315>
 pub(crate) fn process_dict_pairs(this: &ProcTask) -> Vec<(Atom, Term)> {
   debug_assert!(!this.internal.is_locked());
   this.internal.lock().dictionary.pairs()
 }
 
-// BEAM Builtin: https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L333
+/// Returns all keys in the process dictionary.
+///
+/// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process_dict.c#L333>
 pub(crate) fn process_dict_keys(this: &ProcTask) -> Vec<Atom> {
   debug_assert!(!this.internal.is_locked());
   this.internal.lock().dictionary.keys()
 }
 
-// BEAM Builtin: N/A
+/// Returns all values in the process dictionary.
+///
+/// BEAM Builtin: N/A
 pub(crate) fn process_dict_values(this: &ProcTask) -> Vec<Term> {
   debug_assert!(!this.internal.is_locked());
   this.internal.lock().dictionary.values()
@@ -525,6 +775,11 @@ pub(crate) fn process_dict_values(this: &ProcTask) -> Vec<Term> {
 // BIFs - Common Utils
 // -----------------------------------------------------------------------------
 
+/// Translates a PID into its (number, serial) components.
+///
+/// Returns `None` if the PID is invalid (incorrect tag bits).
+///
+/// Used for displaying PIDs in human-readable format.
 pub(crate) fn translate_pid(pid: InternalPid) -> Option<(u32, u32)> {
   if pid.into_bits() & InternalPid::TAG_MASK == InternalPid::TAG_DATA {
     Some(REGISTERED_PROCS.translate_pid(pid))
@@ -537,6 +792,21 @@ pub(crate) fn translate_pid(pid: InternalPid) -> Option<(u32, u32)> {
 // BIFs - Spawn Utils
 // -----------------------------------------------------------------------------
 
+/// Removes a process from all global state during termination.
+///
+/// # Cleanup Protocol
+///
+/// 1. Lock process state (internal + external)
+/// 2. Extract exit reason (or default to "panic")
+/// 3. Unregister name if present
+/// 4. Send LINK_EXIT to all linked processes
+/// 5. Send MONITOR_DOWN to all monitoring processes
+/// 6. Remove from process table
+/// 7. Unlock and complete
+///
+/// # Invocation
+///
+/// Called automatically by [`ProcTask::drop()`] when a process task completes.
 pub(crate) fn process_delete(this: &mut ProcTask) {
   let span: Span = tracing::trace_span!("Proc Delete", pid = %this.readonly.mpid);
   let span_guard: span::Entered<'_> = span.enter();
@@ -600,6 +870,20 @@ pub(crate) fn process_delete(this: &mut ProcTask) {
   drop(span_guard);
 }
 
+/// Creates a new process with the given configuration.
+///
+/// # Initialization
+///
+/// 1. Create signal queue (sender + receiver)
+/// 2. Initialize process state (readonly, internal, external)
+/// 3. Apply spawn options (flags)
+/// 4. Insert into process table (atomically assigns PID)
+///
+/// Returns the process data Arc and signal receiver.
+///
+/// # Panics
+///
+/// Raises exception if the process table is full.
 fn process_create(parent: Option<&ProcTask>, options: SpawnConfig) -> (Arc<ProcData>, ProcRecv) {
   let parent_pid: Option<InternalPid> = parent.map(|process| process.readonly.mpid);
   let leader_pid: Option<InternalPid> = parent.map(|process| process.internal.lock().group_leader);
@@ -625,6 +909,9 @@ fn process_create(parent: Option<&ProcTask>, options: SpawnConfig) -> (Arc<ProcD
 
     let proc_state: *mut ProcData = uninit.as_mut_ptr();
 
+    // SAFETY: We're initializing each field exactly once in the correct order.
+    //         The ProcData fields are initialized via raw pointer writes because
+    //         the ProcTable insert callback works with MaybeUninit.
     unsafe {
       (&raw mut (*proc_state).readonly).write(readonly);
       (&raw mut (*proc_state).internal).write(Mutex::new(internal));
@@ -639,6 +926,30 @@ fn process_create(parent: Option<&ProcTask>, options: SpawnConfig) -> (Arc<ProcD
   (proc, sig_recv)
 }
 
+/// Internal spawn implementation shared by all spawn functions.
+///
+/// # Spawn Sequence
+///
+/// 1. **Create Process**: Allocate state and assign PID
+/// 2. **Create Task**: Wrap future in task-local context
+/// 3. **Initialize Link**: Establish link if requested
+/// 4. **Initialize Monitor**: Establish monitor if requested
+/// 5. **Spawn Task**: Schedule process future on Tokio
+/// 6. **Return Handle**: Return PID (+ monitor ref if monitored)
+///
+/// # Task Loop
+///
+/// The spawned task runs a select loop that:
+/// - Processes incoming signals (exit, link, monitor, message)
+/// - Executes the user-provided future
+/// - Catches panics and converts them to exit reasons
+/// - Stores exit reason on termination
+///
+/// # Panic Handling
+///
+/// User code panics are caught and converted to `Exit::Term` containing
+/// the panic payload. This prevents panics from escaping the process
+/// boundary.
 fn process_spawn_internal<F>(
   parent: Option<&ProcTask>,
   future: F,
@@ -667,7 +978,9 @@ where
 
     tokio::pin!(safe_task);
 
+    // Run signal processing + user future until termination
     let exit: Exit = 'run: loop {
+       // Process all pending signals before waiting
       while let Ok(signal) = queue.try_recv() {
         if let Some(exit) = Process::with(|this| process_handle_signal(this, signal)) {
           break 'run exit;
@@ -676,11 +989,13 @@ where
 
       tokio::select! {
         biased;
+        // Prioritize signals over user code
         Some(signal) = queue.recv() => {
           if let Some(exit) = Process::with(|this| process_handle_signal(this, signal)) {
             break 'run exit;
           }
         }
+        // Execute user future, catching panics
         result = &mut safe_task => match result {
           Ok(()) => break 'run Exit::NORMAL,
           Err(term) => break 'run Exit::Term(Term::new_error(term)),
@@ -688,6 +1003,7 @@ where
       }
     };
 
+    // Store exit reason for cleanup
     Process::with(|this| {
       if let Err(_) = this.external.read().exit.set(exit) {
         raise!(Error, SysInv, "duplicate termination reason");
@@ -750,14 +1066,36 @@ where
 // Misc. Internal Utils
 // -----------------------------------------------------------------------------
 
+/// Looks up a process by PID in the global process table.
+///
+/// Returns `None` if the process doesn't exist or has been removed.
 pub(crate) fn process_find(pid: InternalPid) -> Option<Arc<ProcData>> {
   REGISTERED_PROCS.get(pid)
 }
 
+/// Processes a signal in the context of the receiving process.
+///
+/// Returns `Some(Exit)` if the signal should terminate the process.
 fn process_handle_signal(this: &ProcTask, signal: Signal) -> Option<Exit> {
   signal.recv(&this.readonly, &mut this.internal.lock())
 }
 
+/// Helper for operations that may target the calling process or another process.
+///
+/// Optimizes the common case where the target is the calling process by
+/// avoiding a table lookup. For other PIDs, performs a table lookup.
+///
+/// # Usage
+///
+/// ```ignore
+/// process_with(current_proc, target_pid, |proc| {
+///   let Some(proc) = proc else {
+///     // Target doesn't exist
+///     return;
+///   };
+///   // Use proc...
+/// });
+/// ```
 fn process_with<F, R>(this: &ProcTask, pid: InternalPid, f: F) -> R
 where
   F: FnOnce(Option<&ProcData>) -> R,

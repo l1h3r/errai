@@ -1,3 +1,37 @@
+//! Fundamental runtime types including PIDs, references, terms, destinations, and exit reasons.
+//!
+//! This module provides the core type system for the Errai runtime. These
+//! types enable process identification, message passing, monitoring, and
+//! fault handling.
+//!
+//! # Type Categories
+//!
+//! ## Process Identification
+//!
+//! - [`InternalPid`]: Local process identifier
+//! - [`ExternalPid`]: Distributed process identifier
+//! - [`ProcessId`]: Trait for generic PID handling
+//!
+//! ## Message Destinations
+//!
+//! - [`InternalDest`]: Local destination (PID or name)
+//! - [`ExternalDest`]: Distributed destination (local or remote)
+//!
+//! ## References
+//!
+//! - [`InternalRef`]: Base reference type
+//! - [`ExternalRef`]: Distributed reference
+//! - [`MonitorRef`]: Monitor identifier
+//! - [`AliasRef`]: Process alias identifier
+//! - [`TimerRef`]: Timer identifier
+//!
+//! ## Values and Exit Reasons
+//!
+//! - [`Atom`]: Interned string identifier
+//! - [`Term`]: Type-erased runtime value
+//! - [`Item`]: Trait for values stored in [`Term`]
+//! - [`Exit`]: Process termination reason
+
 mod atom;
 mod dest;
 mod exit;

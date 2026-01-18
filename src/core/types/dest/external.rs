@@ -7,51 +7,158 @@ use crate::core::Atom;
 use crate::core::ExternalPid;
 use crate::core::InternalPid;
 
-/// Represents an internal or external message destination.
+/// Destination identifying a process or registered name across nodes.
+///
+/// This type supports all four addressing modes: local/remote PIDs and
+/// local/remote names. It is used in contexts where the destination might
+/// be distributed, such as monitoring or cross-node messaging.
+///
+/// # Variants
+///
+/// - [`InternalProc`]: Local process by PID
+/// - [`InternalName`]: Local registered name
+/// - [`ExternalProc`]: Remote process by PID
+/// - [`ExternalName`]: Remote registered name (name, node)
+///
+/// # Examples
+///
+/// ```
+/// use errai::core::{Atom, ExternalDest, ExternalPid, InternalPid};
+///
+/// // Local process
+/// let local = ExternalDest::from(InternalPid::from_bits(0x123));
+///
+/// // Local name
+/// let name = ExternalDest::from(Atom::new("logger"));
+///
+/// // Remote name
+/// let remote = ExternalDest::ExternalName(
+///   Atom::new("logger"),
+///   Atom::new("node@host")
+/// );
+/// ```
+///
+/// [`InternalProc`]: ExternalDest::InternalProc
+/// [`InternalName`]: ExternalDest::InternalName
+/// [`ExternalProc`]: ExternalDest::ExternalProc
+/// [`ExternalName`]: ExternalDest::ExternalName
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExternalDest {
-  /// An internal process identifier.
+  /// Destination identifying a local process.
+  ///
+  /// Messages are delivered directly to the local process.
   InternalProc(InternalPid),
-  /// An external process identifier.
-  ExternalProc(ExternalPid),
-  /// An internal registered name.
+  /// Destination identifying a locally registered name.
+  ///
+  /// The name is resolved on the local node at send time.
   InternalName(Atom),
-  /// An external registered name/node pair.
+  /// Destination identifying a remote process.
+  ///
+  /// Messages are routed to the node specified in the PID.
+  ExternalProc(ExternalPid),
+  /// Destination identifying a registered name on a remote node.
+  ///
+  /// Format: `(name, node)`. The name is resolved on the remote node.
   ExternalName(Atom, Atom),
 }
 
 impl ExternalDest {
-  /// Returns `true` if the destination is a PID.
+  /// Returns `true` if this destination identifies a process.
+  ///
+  /// This includes both local and remote PIDs.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use errai::core::{ExternalDest, InternalPid};
+  ///
+  /// let dest = ExternalDest::from(InternalPid::from_bits(0x123));
+  /// assert!(dest.is_proc());
+  /// ```
   #[inline]
   pub const fn is_proc(&self) -> bool {
     matches!(self, Self::InternalProc(_) | Self::ExternalProc(_))
   }
 
-  /// Returns `true` if the destination is an internal PID.
+  /// Returns `true` if this destination identifies a local process.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use errai::core::{ExternalDest, InternalPid};
+  ///
+  /// let dest = ExternalDest::from(InternalPid::from_bits(0x123));
+  /// assert!(dest.is_internal_proc());
+  /// ```
   #[inline]
   pub const fn is_internal_proc(&self) -> bool {
     matches!(self, Self::InternalProc(_))
   }
 
-  /// Returns `true` if the destination is an external PID.
+  /// Returns `true` if this destination identifies a remote process.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use errai::core::{Atom, ExternalDest, ExternalPid, InternalPid};
+  ///
+  /// let pid = ExternalPid::new(
+  ///   InternalPid::from_bits(0x123),
+  ///   Atom::new("node@host")
+  /// );
+  /// let dest = ExternalDest::from(pid);
+  /// assert!(dest.is_external_proc());
+  /// ```
   #[inline]
   pub const fn is_external_proc(&self) -> bool {
     matches!(self, Self::ExternalProc(_))
   }
 
-  /// Returns `true` if the destination is a registered name.
+  /// Returns `true` if this destination identifies a registered name.
+  ///
+  /// This includes both local and remote names.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use errai::core::{Atom, ExternalDest};
+  ///
+  /// let dest = ExternalDest::from(Atom::new("logger"));
+  /// assert!(dest.is_name());
+  /// ```
   #[inline]
   pub const fn is_name(&self) -> bool {
     matches!(self, Self::InternalName(_) | Self::ExternalName(_, _))
   }
 
-  /// Returns `true` if the destination is an internal registered name.
+  /// Returns `true` if this destination identifies a local registered name.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use errai::core::{Atom, ExternalDest};
+  ///
+  /// let dest = ExternalDest::from(Atom::new("logger"));
+  /// assert!(dest.is_internal_name());
+  /// ```
   #[inline]
   pub const fn is_internal_name(&self) -> bool {
     matches!(self, Self::InternalName(_))
   }
 
-  /// Returns `true` if the destination is an external registered name.
+  /// Returns `true` if this destination identifies a remote registered name.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use errai::core::{Atom, ExternalDest};
+  ///
+  /// let dest = ExternalDest::ExternalName(
+  ///   Atom::new("logger"),
+  ///   Atom::new("node@host")
+  /// );
+  /// assert!(dest.is_external_name());
+  /// ```
   #[inline]
   pub const fn is_external_name(&self) -> bool {
     matches!(self, Self::ExternalName(_, _))

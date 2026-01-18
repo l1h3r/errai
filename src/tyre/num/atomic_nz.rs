@@ -6,6 +6,8 @@ use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
 /// A non-zero integer type which can be safely shared between threads.
+///
+/// This type has the same size and bit validity as a [`AtomicU64`].
 #[repr(transparent)]
 pub struct AtomicNzU64 {
   inner: AtomicU64,
@@ -36,14 +38,14 @@ impl AtomicNzU64 {
   /// Creates a new `AtomicNzU64` from a non-zero value.
   #[inline]
   pub fn from_nonzero(value: NonZeroU64) -> Self {
-    // SAFETY: The value is `nonzero`.
+    // SAFETY: The value is non-zero.
     unsafe { Self::new_unchecked(value.get()) }
   }
 
   /// Loads a value from the atomic integer.
   #[inline]
   pub fn load(&self, order: Ordering) -> NonZeroU64 {
-    // SAFETY: The value is always non-zero.
+    // SAFETY: `self` is already known to be non-zero.
     unsafe { NonZeroU64::new_unchecked(self.inner.load(order)) }
   }
 

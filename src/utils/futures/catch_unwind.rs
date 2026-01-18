@@ -1,4 +1,4 @@
-// Implementation borrowed from:
+// Implementation taken from:
 //
 // https://docs.rs/futures/0.3.31/futures/future/struct.CatchUnwind.html
 

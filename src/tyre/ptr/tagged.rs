@@ -60,7 +60,7 @@ where
 
 /// A raw pointer with a tag value.
 ///
-/// This type has the same size and bit validity as a `*mut T`.
+/// This type has the same size and bit validity as a [`*mut T`][`*mut`].
 #[repr(transparent)]
 pub struct TaggedPtr<T>
 where
@@ -73,11 +73,11 @@ impl<T> TaggedPtr<T>
 where
   T: ?Sized,
 {
-  /// Creates a new `TaggedPtr` from `ptr`, assuming it's properly aligned.
+  /// Creates a new `TaggedPtr` from `ptr`, assuming it is properly aligned.
   ///
   /// # Safety
   ///
-  /// The pointer must have sufficient alignment to store a tagvalue.
+  /// The pointer must have sufficient alignment to store a tag value.
   #[must_use]
   #[inline]
   const unsafe fn from_ptr_unchecked(ptr: *mut T) -> Self {

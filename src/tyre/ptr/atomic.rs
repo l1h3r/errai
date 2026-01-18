@@ -10,7 +10,7 @@ use crate::tyre::ptr::TaggedPtr;
 
 /// A raw pointer with a tag value, which can be safely shared between threads.
 ///
-/// This type has the same size and bit validity as a `AtomicPtr<T>`.
+/// This type has the same size and bit validity as a [`AtomicPtr<T>`].
 #[repr(transparent)]
 pub struct AtomicTaggedPtr<T> {
   inner: AtomicPtr<T>,
@@ -148,7 +148,7 @@ impl<T> AtomicTaggedPtr<T> {
     let ptr_a: *mut T = current.as_ptr_tagged();
     let ptr_b: *mut T = new.as_ptr_tagged();
 
-    // SAFETY: `self` is already known to have valid alignment.
+    // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
     self
       .inner
       .compare_exchange(ptr_a, ptr_b, success, failure)
@@ -175,7 +175,7 @@ impl<T> AtomicTaggedPtr<T> {
     let ptr_a: *mut T = current.as_ptr_tagged();
     let ptr_b: *mut T = new.as_ptr_tagged();
 
-    // SAFETY: `self` is already known to have valid alignment.
+    // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
     self
       .inner
       .compare_exchange_weak(ptr_a, ptr_b, success, failure)
@@ -204,7 +204,7 @@ impl<T> AtomicTaggedPtr<T> {
       new.map(TaggedPtr::as_ptr_tagged)
     };
 
-    // SAFETY: `self` is already known to have valid alignment.
+    // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
     self
       .inner
       .fetch_update(store_order, fetch_order, intercept)
@@ -232,7 +232,12 @@ impl<T> AtomicTaggedPtr<T> {
   }
 }
 
+// SAFETY: `AtomicTaggedPtr<T>` is safe to transfer across
+//         thread boundaries because all accesses are atomic.
 unsafe impl<T> Send for AtomicTaggedPtr<T> {}
+
+// SAFETY: `AtomicTaggedPtr<T>` is safe to share between
+//         threads because all accesses are atomic.
 unsafe impl<T> Sync for AtomicTaggedPtr<T> {}
 
 impl<T> Debug for AtomicTaggedPtr<T> {
