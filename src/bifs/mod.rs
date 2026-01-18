@@ -980,7 +980,7 @@ where
 
     // Run signal processing + user future until termination
     let exit: Exit = 'run: loop {
-       // Process all pending signals before waiting
+      // Process all pending signals before waiting
       while let Ok(signal) = queue.try_recv() {
         if let Some(exit) = Process::with(|this| process_handle_signal(this, signal)) {
           break 'run exit;

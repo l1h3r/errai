@@ -502,7 +502,7 @@ impl Process {
     Self::with(|this| bifs::process_dict_delete(this, key.into()))
   }
 
-  /// Clears the prcoess dictionary and returns the previous key-value pairs.
+  /// Clears the process dictionary and returns the previous key-value pairs.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#erase/0>
   pub fn clear() -> Vec<(Atom, Term)> {

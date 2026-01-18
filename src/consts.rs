@@ -153,7 +153,7 @@ pub const DEFAULT_THREAD_STACK_SIZE: usize = 2 * 1024 * 1024;
 // System - Shutdown
 // -----------------------------------------------------------------------------
 
-// Maximum duration allowed for graceful runtime shutdown.
+/// Maximum duration allowed for graceful runtime shutdown.
 ///
 /// The runtime waits up to this duration for processes to terminate cleanly
 /// during shutdown.
