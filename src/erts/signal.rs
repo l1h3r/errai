@@ -113,7 +113,7 @@ impl SignalRecv for Signal {
   fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     let span: Span = tracing::trace_span!(
       "Proc Signal",
-      type = %self.kind(),
+      mpid = %readonly.mpid,
       from = %self.from(),
     );
 
