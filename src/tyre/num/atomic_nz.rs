@@ -2,8 +2,9 @@ use core::fmt::Debug;
 use core::fmt::Formatter;
 use core::fmt::Result;
 use core::num::NonZeroU64;
-use core::sync::atomic::AtomicU64;
-use core::sync::atomic::Ordering;
+
+use crate::loom::sync::atomic::AtomicU64;
+use crate::loom::sync::atomic::Ordering;
 
 /// A non-zero integer type which can be safely shared between threads.
 ///
@@ -19,8 +20,8 @@ impl AtomicNzU64 {
 
   /// Creates a new `AtomicNzU64`.
   #[inline]
-  pub fn new() -> Self {
-    Self::from_nonzero(Self::NZ_ONE)
+  pub fn new(value: u64) -> Option<Self> {
+    NonZeroU64::new(value).map(Self::from_nonzero)
   }
 
   /// Creates a new `AtomicNzU64` without checking whether the value is non-zero.
@@ -84,7 +85,7 @@ impl Debug for AtomicNzU64 {
 impl Default for AtomicNzU64 {
   #[inline]
   fn default() -> Self {
-    Self::new()
+    Self::from_nonzero(Self::NZ_ONE)
   }
 }
 
@@ -97,28 +98,30 @@ impl From<NonZeroU64> for AtomicNzU64 {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use crate::loom::sync::atomic::Ordering;
+  use crate::tyre::num::AtomicNzU64;
 
   #[test]
   fn test_fetch_add_wrapping() {
-    let atomic = AtomicNzU64::from_nonzero(NonZeroU64::new(1).unwrap());
+    let atomic: AtomicNzU64 = AtomicNzU64::new(1).unwrap();
 
-    // This should handle wrapping correctly
-    let previous: NonZeroU64 = atomic.fetch_add(u64::MAX, Ordering::Relaxed);
-    assert_eq!(previous.get(), 1);
+    let old: u64 = atomic.fetch_add(u64::MAX, Ordering::Relaxed).get();
+    assert_eq!(old, 1);
 
-    // Atomic should never be zero
-    let current: NonZeroU64 = atomic.load(Ordering::Relaxed);
-    assert_ne!(current.get(), 0, "Atomic value wrapped to zero - UB!");
+    let new: u64 = atomic.load(Ordering::Relaxed).get();
+    assert_eq!(new, 1);
   }
 
   #[test]
   fn test_multiple_wraps() {
-    let atomic = AtomicNzU64::new();
+    let atomic: AtomicNzU64 = AtomicNzU64::new(1).unwrap();
 
     for _ in 0..1000 {
-      atomic.fetch_add(u64::MAX / 100, Ordering::Relaxed);
-      assert_ne!(atomic.load(Ordering::Relaxed).get(), 0);
+      let old: u64 = atomic.fetch_add(u64::MAX / 100, Ordering::Relaxed).get();
+      assert_ne!(old, 0);
+
+      let new: u64 = atomic.load(Ordering::Relaxed).get();
+      assert_ne!(new, 0);
     }
   }
 }

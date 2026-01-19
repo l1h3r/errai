@@ -9,7 +9,8 @@ use core::mem::MaybeUninit;
 use core::panic::RefUnwindSafe;
 use core::panic::UnwindSafe;
 use core::ptr;
-use core::sync::atomic::AtomicPtr;
+
+use crate::loom::sync::atomic::AtomicPtr;
 
 #[cfg(target_pointer_width = "32")]
 const ASSUMED_FREE_BITS: u32 = 2;

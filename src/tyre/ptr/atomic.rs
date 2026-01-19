@@ -3,9 +3,9 @@ use core::fmt::Formatter;
 use core::fmt::Pointer;
 use core::fmt::Result as FmtResult;
 use core::panic::RefUnwindSafe;
-use core::sync::atomic::AtomicPtr;
-use core::sync::atomic::Ordering;
 
+use crate::loom::sync::atomic::AtomicPtr;
+use crate::loom::sync::atomic::Ordering;
 use crate::tyre::ptr::TaggedPtr;
 
 /// A raw pointer with a tag value, which can be safely shared between threads.
@@ -42,7 +42,7 @@ impl<T> AtomicTaggedPtr<T> {
   /// hold a tag value.
   #[must_use]
   #[inline]
-  pub const fn null() -> Self {
+  pub fn null() -> Self {
     Self::from_tagged(TaggedPtr::null())
   }
 
@@ -50,7 +50,7 @@ impl<T> AtomicTaggedPtr<T> {
   /// a tag value.
   #[must_use]
   #[inline]
-  pub const fn new(ptr: *mut T) -> Option<AtomicTaggedPtr<T>> {
+  pub fn new(ptr: *mut T) -> Option<AtomicTaggedPtr<T>> {
     if let Some(tagged) = TaggedPtr::new(ptr) {
       Some(Self::from_tagged(tagged))
     } else {
@@ -65,14 +65,14 @@ impl<T> AtomicTaggedPtr<T> {
   /// `ptr` must have sufficient alignment to hold a tag value.
   #[must_use]
   #[inline]
-  pub const unsafe fn new_unchecked(ptr: *mut T) -> Self {
+  pub unsafe fn new_unchecked(ptr: *mut T) -> Self {
     // SAFETY: This is guaranteed to be safe by the caller.
     Self::from_tagged(unsafe { TaggedPtr::new_unchecked(ptr) })
   }
 
   /// Creates a new `AtomicTaggedPtr` from `ptr`.
   #[inline]
-  pub const fn from_tagged(ptr: TaggedPtr<T>) -> AtomicTaggedPtr<T> {
+  pub fn from_tagged(ptr: TaggedPtr<T>) -> AtomicTaggedPtr<T> {
     Self {
       inner: AtomicPtr::new(ptr.as_ptr_tagged()),
     }
@@ -84,7 +84,7 @@ impl<T> AtomicTaggedPtr<T> {
   /// threads are concurrently accessing the atomic data.
   #[must_use]
   #[inline]
-  pub const fn into_inner(self) -> *mut T {
+  pub fn into_inner(self) -> *mut T {
     self.inner.into_inner()
   }
 
@@ -94,7 +94,7 @@ impl<T> AtomicTaggedPtr<T> {
   /// threads are concurrently accessing the atomic data.
   #[must_use]
   #[inline]
-  pub const fn into_tagged(self) -> TaggedPtr<T> {
+  pub fn into_tagged(self) -> TaggedPtr<T> {
     // SAFETY: `self` is already known to have valid alignment.
     unsafe { TaggedPtr::new_unchecked(self.into_inner()) }
   }

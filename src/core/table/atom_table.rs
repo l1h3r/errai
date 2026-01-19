@@ -367,3 +367,37 @@ impl Block {
     unsafe { self.inner.get_unchecked_mut(index) }
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use std::thread;
+  use triomphe::Arc;
+
+  use crate::core::table::AtomTable;
+  use crate::loom::sync::Barrier;
+
+  #[test]
+  fn stress_concurrent_same_atom() {
+    let table: Arc<AtomTable> = Arc::new(AtomTable::new());
+    let barrier: Arc<Barrier> = Arc::new(Barrier::new(100));
+
+    let threads: Vec<_> = (0..100)
+      .map(|_| {
+        let table: Arc<AtomTable> = Arc::clone(&table);
+        let barrier: Arc<Barrier> = Arc::clone(&barrier);
+
+        thread::spawn(move || {
+          barrier.wait();
+          table.set("test").unwrap()
+        })
+      })
+      .collect();
+
+    let indices: Vec<u32> = threads
+      .into_iter()
+      .map(|handle| handle.join().unwrap())
+      .collect();
+
+    assert!(indices.windows(2).all(|window| window[0] == window[1]));
+  }
+}

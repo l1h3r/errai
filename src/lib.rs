@@ -28,6 +28,7 @@
 //! - [`consts`]: Runtime configuration constants
 
 mod bifs;
+mod loom;
 mod proc;
 mod utils;
 

@@ -3,7 +3,6 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use std::num::NonZeroU64;
 use std::sync::OnceLock;
-use std::sync::atomic::Ordering;
 use tokio::task::JoinHandle;
 
 use crate::core::Atom;
@@ -23,6 +22,7 @@ use crate::erts::SignalMonitorDown;
 use crate::erts::SignalSend;
 use crate::erts::SignalUnlink;
 use crate::erts::SignalUnlinkAck;
+use crate::loom::sync::atomic::Ordering;
 use crate::proc::ProcDict;
 use crate::proc::ProcLink;
 use crate::proc::ProcMail;
@@ -113,7 +113,7 @@ impl ProcReadOnly {
       send,
       root,
       task: OnceLock::new(),
-      puid: AtomicNzU64::new(),
+      puid: AtomicNzU64::default(),
     }
   }
 

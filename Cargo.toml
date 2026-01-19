@@ -35,3 +35,9 @@ tokio = { version = "1.49", default-features = false, features = ["macros", "net
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "fmt", "std"] }
 triomphe = { version = "0.1", default-features = false }
+
+[target.'cfg(loom)'.dependencies]
+loom = { version = "0.7", default-features = false }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }

@@ -48,16 +48,12 @@
 //! residing in its own cache line.
 
 use crossbeam_utils::CachePadded;
-use std::alloc::Layout;
-use std::alloc::alloc;
-use std::alloc::dealloc;
 use std::alloc::handle_alloc_error;
 use std::error::Error;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
-use std::hint;
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::mem::MaybeUninit;
@@ -65,17 +61,21 @@ use std::num::NonZeroUsize;
 use std::panic::RefUnwindSafe;
 use std::panic::UnwindSafe;
 use std::ptr::NonNull;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::AcqRel;
-use std::sync::atomic::Ordering::Acquire;
-use std::sync::atomic::Ordering::Relaxed;
-use std::sync::atomic::Ordering::Release;
 use triomphe::Arc;
 use triomphe::UniqueArc;
 
 use crate::core::InternalPid;
+use crate::loom::alloc::Layout;
+use crate::loom::alloc::alloc;
+use crate::loom::alloc::dealloc;
+use crate::loom::hint;
+use crate::loom::sync::atomic::AtomicU32;
+use crate::loom::sync::atomic::AtomicU64;
+use crate::loom::sync::atomic::AtomicUsize;
+use crate::loom::sync::atomic::Ordering::AcqRel;
+use crate::loom::sync::atomic::Ordering::Acquire;
+use crate::loom::sync::atomic::Ordering::Relaxed;
+use crate::loom::sync::atomic::Ordering::Release;
 use crate::tyre::ptr::AtomicTaggedPtr;
 use crate::tyre::ptr::TaggedPtr;
 
@@ -215,13 +215,28 @@ impl<T> ProcTable<T> {
   pub const MIN_ENTRIES: usize = 1 << 4;
 
   /// Maximum number of entries supported in the table.
-  pub const MAX_ENTRIES: usize = 1 << 27;
+  pub const MAX_ENTRIES: usize = {
+    #[cfg(not(any(miri, test)))]
+    {
+      1 << 27
+    }
+    #[cfg(any(miri, test))]
+    {
+      1 << 20
+    }
+  };
 
   /// Default number of entries in a new table.
-  #[cfg(not(test))]
-  pub const DEF_ENTRIES: usize = 1 << 20;
-  #[cfg(test)]
-  pub const DEF_ENTRIES: usize = 1 << 10;
+  pub const DEF_ENTRIES: usize = {
+    #[cfg(not(any(miri, test)))]
+    {
+      1 << 20
+    }
+    #[cfg(any(miri, test))]
+    {
+      1 << 10
+    }
+  };
 
   /// Creates a new, empty table using the default capacity.
   #[inline]
@@ -578,7 +593,31 @@ impl<T> ProcTable<T> {
       );
 
       // -----------------------------------------------------------------------
-      // 4. Release Slot
+      // 4. Read Entry
+      // -----------------------------------------------------------------------
+
+      debug_assert!(
+        !item.is_null(),
+        "ProcTable::do_remove requires that the pointer is not NULL",
+      );
+
+      debug_assert!(
+        item.is_aligned(),
+        "ProcTable::do_remove requires that the pointer is aligned",
+      );
+
+      // SAFETY: The pointer was created from a valid Arc during insertion.
+      let data_source: Arc<T> = unsafe { Arc::from_raw(item.as_ptr()) };
+
+      // -----------------------------------------------------------------------
+      // 5. Delete Entry
+      // -----------------------------------------------------------------------
+
+      // Release: Make the null write visible to all threads.
+      slot.store(TaggedPtr::null(), Release);
+
+      // -----------------------------------------------------------------------
+      // 6. Release Slot
       // -----------------------------------------------------------------------
 
       let data: u64 = self.refresh_data(pid);
@@ -614,30 +653,6 @@ impl<T> ProcTable<T> {
 
       // Release: Make the length decrement visible to all threads.
       let _update_len: u32 = self.volatile.len.fetch_sub(1, Release);
-
-      // -----------------------------------------------------------------------
-      // 5. Read Entry
-      // -----------------------------------------------------------------------
-
-      debug_assert!(
-        !item.is_null(),
-        "ProcTable::do_remove requires that the pointer is not NULL",
-      );
-
-      debug_assert!(
-        item.is_aligned(),
-        "ProcTable::do_remove requires that the pointer is aligned",
-      );
-
-      // SAFETY: The pointer was created from a valid Arc during insertion.
-      let data_source: Arc<T> = unsafe { Arc::from_raw(item.as_ptr()) };
-
-      // -----------------------------------------------------------------------
-      // 6. Delete Entry
-      // -----------------------------------------------------------------------
-
-      // Release: Make the null write visible to all threads.
-      slot.store(TaggedPtr::null(), Release);
 
       // -----------------------------------------------------------------------
       // 7. Return
@@ -1290,7 +1305,14 @@ impl<T> ReadOnly<T> {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use std::mem::MaybeUninit;
+  use std::thread;
+  use std::thread::JoinHandle;
+  use triomphe::Arc;
+
+  use crate::core::InternalPid;
+  use crate::core::table::ProcTable;
+  use crate::core::table::proc_table::Index;
 
   type Table = ProcTable<usize>;
 
@@ -1381,5 +1403,45 @@ mod tests {
     let keys: Vec<InternalPid> = table.keys().collect();
 
     assert_eq!(keys.len(), 2);
+  }
+
+  #[cfg(not(miri))]
+  #[test]
+  fn test_concurrent_stress() {
+    const THREAD_NUM: usize = 100;
+    const THREAD_OPS: usize = 1000;
+
+    let table: Arc<Table> = Arc::new(Table::with_capacity(1024));
+    let mut handles: Vec<JoinHandle<()>> = Vec::new();
+
+    for i in 0..THREAD_NUM {
+      let table: Arc<Table> = Arc::clone(&table);
+
+      let handle: JoinHandle<()> = thread::spawn(move || {
+        for j in 0..THREAD_OPS {
+          let mut new_pid: Option<InternalPid> = None;
+
+          let result = table.insert(|val, pid| {
+            new_pid = Some(pid);
+            val.write(i * THREAD_OPS + j);
+          });
+
+          if let Ok(arc) = result {
+            let pid = new_pid.unwrap();
+            let removed = table.remove(pid);
+
+            assert_eq!(removed.map(|item| *item), Some(i * THREAD_OPS + j));
+          }
+        }
+      });
+
+      handles.push(handle);
+    }
+
+    for handle in handles {
+      handle.join().unwrap();
+    }
+
+    assert_eq!(table.len(), 0);
   }
 }
