@@ -21,7 +21,7 @@ pub(crate) struct ProcTask {
 
 impl Drop for ProcTask {
   fn drop(&mut self) {
-    bifs::process_delete(self);
+    bifs::proc_remove(self);
   }
 }
 

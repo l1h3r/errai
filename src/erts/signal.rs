@@ -628,7 +628,7 @@ impl SignalRecv for SignalUnlink {
           return None;
         }
 
-        if let Some(proc) = bifs::process_find(self.from) {
+        if let Some(proc) = bifs::proc_find(self.from) {
           proc.readonly.send_unlink_ack(readonly.mpid, self.ulid);
           tracing::trace!(result = "handled", reason = "good PID");
         } else {

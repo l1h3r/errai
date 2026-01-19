@@ -220,7 +220,7 @@ fn spawn_root_process<F>(future: F, shutdown: Sender<()>) -> InternalPid
 where
   F: Future<Output = ()> + Send + 'static,
 {
-  bifs::process_spawn_root(async move {
+  bifs::proc_spawn_root(async move {
     let this: InternalPid = Process::this();
 
     tracing::trace!(pid = %this, "Enter Root Process");

@@ -41,9 +41,6 @@ pub struct ProcessInfo {}
 
 // -----------------------------------------------------------------------------
 // Process Flags
-//
-// Somewhat copied from:
-//   https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_process.h#L1632
 // -----------------------------------------------------------------------------
 
 bitflags! {
@@ -124,14 +121,14 @@ impl Process {
   where
     F: Future<Output = ()> + Send + 'static,
   {
-    Self::with(|this| bifs::process_spawn(this, opts, future))
+    Self::with(|this| bifs::proc_spawn(this, opts, future))
   }
 
   /// Sends an exit signal with the given `reason` to `pid`.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#exit/2>
   pub fn exit(pid: impl ProcessId, reason: impl Into<Exit>) {
-    Self::with(|this| bifs::process_exit(this, pid, reason.into()))
+    Self::with(|this| bifs::proc_exit(this, pid, reason.into()))
   }
 
   // ---------------------------------------------------------------------------
@@ -151,7 +148,7 @@ impl Process {
   where
     T: Item,
   {
-    Self::with(|this| bifs::process_send(this, dest.into(), Term::new(term)))
+    Self::with(|this| bifs::proc_send(this, dest.into(), Term::new(term)))
   }
 
   /// Checks if there is a message matching the given type `T` in the mailbox of
@@ -162,7 +159,7 @@ impl Process {
   where
     T: 'static,
   {
-    Self::with(|this| bifs::process_receive::<T>(this.readonly.mpid)).await
+    Self::with(|this| bifs::proc_receive::<T>(this.readonly.mpid)).await
   }
 
   /// Checks if there is a message matching the given type `T` in the mailbox of
@@ -173,14 +170,14 @@ impl Process {
   where
     T: 'static,
   {
-    Self::with(|this| bifs::process_receive_exact::<T>(this.readonly.mpid)).await
+    Self::with(|this| bifs::proc_receive_exact::<T>(this.readonly.mpid)).await
   }
 
   /// Checks if there is a message in the mailbox of the current process.
   ///
   /// REF: <https://www.erlang.org/doc/system/expressions.html#receive>
   pub async fn receive_any() -> DynMessage {
-    Self::with(|this| bifs::process_receive_any(this.readonly.mpid)).await
+    Self::with(|this| bifs::proc_receive_any(this.readonly.mpid)).await
   }
 
   // ---------------------------------------------------------------------------
@@ -197,7 +194,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#link/1>
   pub fn link(pid: impl ProcessId) {
-    Self::with(|this| bifs::process_link(this, pid))
+    Self::with(|this| bifs::proc_link(this, pid))
   }
 
   /// Removes the link between the calling process and the given `pid`.
@@ -207,7 +204,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#unlink/1>
   pub fn unlink(pid: impl ProcessId) {
-    Self::with(|this| bifs::process_unlink(this, pid))
+    Self::with(|this| bifs::proc_unlink(this, pid))
   }
 
   // ---------------------------------------------------------------------------
@@ -234,7 +231,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#monitor/2>
   pub fn monitor(item: impl Into<ExternalDest>) -> MonitorRef {
-    Self::with(|this| bifs::process_monitor(this, item.into()))
+    Self::with(|this| bifs::proc_monitor(this, item.into()))
   }
 
   /// Demonitors the monitor identified by the given `reference`.
@@ -245,7 +242,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#demonitor/1>
   pub fn demonitor(reference: MonitorRef) {
-    Self::with(|this| bifs::process_demonitor(this, reference))
+    Self::with(|this| bifs::proc_demonitor(this, reference))
   }
 
   // ---------------------------------------------------------------------------
@@ -361,13 +358,13 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#processes/0>
   pub fn list() -> Vec<InternalPid> {
-    bifs::process_list()
+    bifs::proc_list()
   }
 
   /// Returns `true` if the process exists and is alive, that is, is not exiting
   /// and has not exited. Otherwise returns `false`.
   pub fn alive(pid: InternalPid) -> bool {
-    Self::with(|this| bifs::process_alive(this, pid))
+    Self::with(|this| bifs::proc_alive(this, pid))
   }
 
   /// Returns information about the process identified by `pid`.
@@ -376,7 +373,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_info/1>
   pub fn info(pid: InternalPid) -> Option<ProcessInfo> {
-    Self::with(|this| bifs::process_info(this, pid))
+    Self::with(|this| bifs::proc_info(this, pid))
   }
 
   // ---------------------------------------------------------------------------
@@ -415,7 +412,7 @@ impl Process {
   ///
   /// [`Exception`]: crate::error::Exception
   pub fn register(pid: InternalPid, name: impl Into<Atom>) {
-    Self::with(|this| bifs::process_register(this, pid, name.into()))
+    Self::with(|this| bifs::proc_register(this, pid, name.into()))
   }
 
   /// Removes the registered `name`, associated with a PID.
@@ -428,21 +425,21 @@ impl Process {
   ///
   /// [`Exception`]: crate::error::Exception
   pub fn unregister(name: impl Into<Atom>) {
-    Self::with(|this| bifs::process_unregister(this, name.into()))
+    Self::with(|this| bifs::proc_unregister(this, name.into()))
   }
 
   /// Returns the PID under `name`, or `None` if the name is not registered.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#whereis/1>
   pub fn whereis(name: impl Into<Atom>) -> Option<InternalPid> {
-    bifs::process_whereis(name.into())
+    bifs::proc_whereis(name.into())
   }
 
   /// Returns a list of names which have been registered using [`Process::register`].
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#registered/0>
   pub fn registered() -> Vec<Atom> {
-    bifs::process_registered()
+    bifs::proc_registered()
   }
 
   // ---------------------------------------------------------------------------
@@ -453,21 +450,21 @@ impl Process {
   ///
   /// REF: **N/A**
   pub fn get_flags() -> ProcessFlags {
-    Self::with(bifs::process_get_flags)
+    Self::with(bifs::proc_get_flags)
   }
 
   /// Sets the process flags of the calling process.
   ///
   /// REF: **N/A**
   pub fn set_flags(flags: ProcessFlags) {
-    Self::with(|this| bifs::process_set_flags(this, flags))
+    Self::with(|this| bifs::proc_set_flags(this, flags))
   }
 
   /// Sets the process flag indicated to the specified value.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#process_flag/2>
   pub fn set_flag(flag: ProcessFlags, value: bool) {
-    Self::with(|this| bifs::process_set_flag(this, flag, value))
+    Self::with(|this| bifs::proc_set_flag(this, flag, value))
   }
 
   // ---------------------------------------------------------------------------
@@ -481,7 +478,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#put/2>
   pub fn put(key: impl Into<Atom>, value: impl Into<Term>) -> Option<Term> {
-    Self::with(|this| bifs::process_dict_put(this, key.into(), value.into()))
+    Self::with(|this| bifs::proc_dict_put(this, key.into(), value.into()))
   }
 
   /// Returns the value for the given `key` in the process dictionary,
@@ -489,7 +486,7 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get/1>
   pub fn get(key: impl Into<Atom>) -> Option<Term> {
-    Self::with(|this| bifs::process_dict_get(this, key.into()))
+    Self::with(|this| bifs::proc_dict_get(this, key.into()))
   }
 
   /// Deletes the given `key` from the process dictionary.
@@ -499,35 +496,35 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#erase/1>
   pub fn delete(key: impl Into<Atom>) -> Option<Term> {
-    Self::with(|this| bifs::process_dict_delete(this, key.into()))
+    Self::with(|this| bifs::proc_dict_delete(this, key.into()))
   }
 
   /// Clears the process dictionary and returns the previous key-value pairs.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#erase/0>
   pub fn clear() -> Vec<(Atom, Term)> {
-    Self::with(bifs::process_dict_clear)
+    Self::with(bifs::proc_dict_clear)
   }
 
   /// Returns a list of all key-value pairs in the process dictionary.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get/0>
   pub fn pairs() -> Vec<(Atom, Term)> {
-    Self::with(bifs::process_dict_pairs)
+    Self::with(bifs::proc_dict_pairs)
   }
 
   /// Returns a list of all keys in the process dictionary.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#get_keys/0>
   pub fn keys() -> Vec<Atom> {
-    Self::with(bifs::process_dict_keys)
+    Self::with(bifs::proc_dict_keys)
   }
 
   /// Returns a list of all values in the process dictionary.
   ///
   /// REF: **N/A**
   pub fn values() -> Vec<Term> {
-    Self::with(bifs::process_dict_values)
+    Self::with(bifs::proc_dict_values)
   }
 
   // ---------------------------------------------------------------------------
