@@ -54,11 +54,24 @@ pub trait Item: Any + Debug + DynClone + Send + Sync + 'static {
   ///
   /// This enables owned downcasting to the concrete type.
   fn into_any(self: Box<Self>) -> Box<dyn Any + Send + Sync>;
+
+  /// Tests for `self` and `other` values to be equal.
+  ///
+  /// This is stricter than [`PartialEq`] because the types must be identical.
+  fn dyn_eq(&self, other: &dyn Any) -> bool;
+}
+
+impl PartialEq for dyn Item {
+  #[inline]
+  fn eq(&self, other: &Self) -> bool {
+    self.dyn_eq(other)
+  }
 }
 
 impl<T> Item for T
 where
   T: Any + Debug + DynClone + Send + Sync + 'static,
+  T: PartialEq,
 {
   #[inline]
   fn as_any(&self) -> &(dyn Any + Send + Sync) {
@@ -73,5 +86,12 @@ where
   #[inline]
   fn into_any(self: Box<Self>) -> Box<dyn Any + Send + Sync> {
     self
+  }
+
+  #[inline]
+  fn dyn_eq(&self, other: &dyn Any) -> bool {
+    other
+      .downcast_ref::<T>()
+      .map_or(false, |other| PartialEq::eq(self, other))
   }
 }

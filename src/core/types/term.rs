@@ -277,6 +277,13 @@ impl Display for Term {
   }
 }
 
+impl PartialEq for Term {
+  #[inline]
+  fn eq(&self, other: &Self) -> bool {
+    self.data.eq(&other.data)
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
@@ -435,7 +442,7 @@ mod tests {
     let b: Term = Term::new(123_i32);
     let c: Term = Term::new(99_i32);
 
-    // assert_eq!(a, b); // TODO: uncomment when Terms are comparable
-    // assert_ne!(a, c); // TODO: uncomment when Terms are comparable
+    assert_eq!(a, b);
+    assert_ne!(a, c);
   }
 }

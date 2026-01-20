@@ -172,7 +172,7 @@ mod tests {
 
     let item: Option<Term> = dict.get(&name);
     assert!(item.is_some());
-    // assert_eq!(item.unwrap(), data); // TODO: uncomment when Terms are comparable
+    assert_eq!(item.unwrap(), data);
   }
 
   #[test]
@@ -187,8 +187,8 @@ mod tests {
     let item: Option<Term> = dict.insert(name, v2.clone());
 
     assert!(item.is_some());
-    // assert_eq!(item.unwrap(), v1); // TODO: uncomment when Terms are comparable
-    // assert_eq!(dict.get(&name).unwrap(), v2); // TODO: uncomment when Terms are comparable
+    assert_eq!(item.unwrap(), v1);
+    assert_eq!(dict.get(&name).unwrap(), v2);
   }
 
   #[test]
@@ -203,7 +203,7 @@ mod tests {
 
     assert!(item.is_some());
     assert!(dict.get(&name).is_none());
-    // assert_eq!(item.unwrap(), data); // TODO: uncomment when Terms are comparable
+    assert_eq!(item.unwrap(), data);
   }
 
   #[test]
@@ -266,8 +266,8 @@ mod tests {
     let values: Vec<Term> = dict.values();
 
     assert_eq!(values.len(), 2);
-    // assert!(values.contains(&v1)); // TODO: uncomment when Terms are comparable
-    // assert!(values.contains(&v2)); // TODO: uncomment when Terms are comparable
+    assert!(values.contains(&v1));
+    assert!(values.contains(&v2));
   }
 
   #[test]
@@ -282,7 +282,7 @@ mod tests {
     let pairs: Vec<(Atom, Term)> = dict.pairs();
 
     assert_eq!(pairs.len(), 1);
-    // assert_eq!(pairs[0], (name, data)); // TODO: uncomment when Terms are comparable
+    assert_eq!(pairs[0], (name, data));
   }
 
   #[test]
