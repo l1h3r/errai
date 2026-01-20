@@ -6,7 +6,6 @@ use std::panic::PanicHookInfo;
 use std::process;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
-use std::thread;
 use tokio::runtime::Builder;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
@@ -24,6 +23,7 @@ use crate::core::Term;
 use crate::erts::DynMessage;
 use crate::erts::Process;
 use crate::erts::ProcessFlags;
+use crate::erts::System;
 
 type PanicHook = Box<dyn Fn(&PanicHookInfo<'_>) + Sync + Send + 'static>;
 
@@ -178,20 +178,8 @@ fn build_runtime() -> Result<Runtime, Error> {
     .thread_keep_alive(consts::DEFAULT_THREAD_KEEP_ALIVE)
     .thread_name_fn(next_worker_name)
     .thread_stack_size(consts::DEFAULT_THREAD_STACK_SIZE)
-    .worker_threads(available_cpus())
+    .worker_threads(System::available_cpus())
     .build()
-}
-
-/// Returns the number of available CPU cores.
-///
-/// Falls back to [`DEFAULT_PARALLELISM`] if CPU detection fails.
-///
-/// [`DEFAULT_PARALLELISM`]: consts::DEFAULT_PARALLELISM
-fn available_cpus() -> usize {
-  match thread::available_parallelism() {
-    Ok(count) => count.get(),
-    Err(_) => consts::DEFAULT_PARALLELISM,
-  }
 }
 
 /// Atomically increments and returns the next worker thread ID.
