@@ -275,9 +275,9 @@ impl Process {
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#send_after/3>
   pub fn send_after<T>(dest: impl Into<InternalDest>, term: T, time: Duration) -> TimerRef
   where
-    T: Send + 'static,
+    T: Item,
   {
-    todo!()
+    Self::with(|this| bifs::proc_timer_init(this, dest.into(), Term::new(term), time))
   }
 
   /// Cancels a timer returned by [`Process::send_after`].
@@ -289,8 +289,8 @@ impl Process {
   /// not tell you if the timeout message has arrived at its destination yet.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#cancel_timer/1>
-  pub async fn cancel_timer(timer: TimerRef) -> Option<Duration> {
-    todo!()
+  pub async fn cancel_timer_blocking(timer: TimerRef) -> Option<Duration> {
+    bifs::proc_timer_stop_blocking(timer).await
   }
 
   /// Cancels a timer returned by [`Process::send_after`].
@@ -304,9 +304,9 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#cancel_timer/1>
   ///
-  /// [`message`]: todo!()
-  pub fn cancel_timer_non_blocking(timer: TimerRef) {
-    todo!()
+  /// [`message`]: crate::bifs::StopTimerAck
+  pub fn cancel_timer(timer: TimerRef) {
+    Self::with(|this| bifs::proc_timer_stop(this, timer))
   }
 
   /// Reads a timer created by [`Process::send_after`].
@@ -318,8 +318,8 @@ impl Process {
   /// not tell you if the timeout message has arrived at its destination yet.
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#read_timer/1>
-  pub async fn read_timer(timer: TimerRef) -> Option<Duration> {
-    todo!()
+  pub async fn read_timer_blocking(timer: TimerRef) -> Option<Duration> {
+    bifs::proc_timer_read_blocking(timer).await
   }
 
   /// Reads a timer created by [`Process::send_after`].
@@ -333,9 +333,9 @@ impl Process {
   ///
   /// REF: <https://www.erlang.org/doc/apps/erts/erlang.html#read_timer/1>
   ///
-  /// [`message`]: todo!()
-  pub fn read_timer_non_blocking(timer: TimerRef) {
-    todo!()
+  /// [`message`]: crate::bifs::ReadTimerAck
+  pub fn read_timer(timer: TimerRef) {
+    Self::with(|this| bifs::proc_timer_read(this, timer))
   }
 
   // ---------------------------------------------------------------------------

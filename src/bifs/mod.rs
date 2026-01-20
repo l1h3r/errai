@@ -73,6 +73,7 @@ mod mailbox;
 mod monitor;
 mod name;
 mod spawn;
+mod timer;
 
 pub(crate) use self::dictionary::proc_dict_clear;
 pub(crate) use self::dictionary::proc_dict_delete;
@@ -111,6 +112,15 @@ pub(crate) use self::spawn::proc_exit;
 pub(crate) use self::spawn::proc_remove;
 pub(crate) use self::spawn::proc_spawn;
 pub(crate) use self::spawn::proc_spawn_root;
+
+pub(crate) use self::timer::proc_timer_init;
+pub(crate) use self::timer::proc_timer_read;
+pub(crate) use self::timer::proc_timer_read_blocking;
+pub(crate) use self::timer::proc_timer_stop;
+pub(crate) use self::timer::proc_timer_stop_blocking;
+
+pub use self::timer::ReadTimerAck;
+pub use self::timer::StopTimerAck;
 
 // -----------------------------------------------------------------------------
 // BIFs - Common Utils

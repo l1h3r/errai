@@ -39,3 +39,10 @@ pub mod erts;
 pub mod init;
 pub mod node;
 pub mod tyre;
+
+pub mod time {
+  //! Timer types and utilities.
+
+  pub use crate::bifs::ReadTimerAck;
+  pub use crate::bifs::StopTimerAck;
+}
