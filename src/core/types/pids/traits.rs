@@ -31,8 +31,7 @@ impl private::Sealed for InternalPid {}
 ///   !P::DISTRIBUTED
 /// }
 ///
-/// let local = InternalPid::from_bits(0x123);
-/// assert!(is_local(local));
+/// assert!(is_local(InternalPid::EXAMPLE_PROC));
 /// ```
 pub trait ProcessId: private::Sealed + Copy + Debug + Display {
   /// Indicates whether this process identifier is distributed.

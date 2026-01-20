@@ -31,7 +31,7 @@ impl ExternalPid {
   /// ```
   /// use errai::core::{Atom, ExternalPid, InternalPid};
   ///
-  /// let bits = InternalPid::from_bits(0x456);
+  /// let bits = InternalPid::EXAMPLE_PROC;
   /// let node = Atom::new("remote@host");
   /// let pid = ExternalPid::new(bits, node);
   /// ```

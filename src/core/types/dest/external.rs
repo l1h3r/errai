@@ -26,7 +26,7 @@ use crate::core::InternalPid;
 /// use errai::core::{Atom, ExternalDest, ExternalPid, InternalPid};
 ///
 /// // Local process
-/// let local = ExternalDest::from(InternalPid::from_bits(0x123));
+/// let local = ExternalDest::from(InternalPid::EXAMPLE_PROC);
 ///
 /// // Local name
 /// let name = ExternalDest::from(Atom::new("logger"));
@@ -72,7 +72,7 @@ impl ExternalDest {
   /// ```
   /// use errai::core::{ExternalDest, InternalPid};
   ///
-  /// let dest = ExternalDest::from(InternalPid::from_bits(0x123));
+  /// let dest = ExternalDest::from(InternalPid::EXAMPLE_PROC);
   /// assert!(dest.is_proc());
   /// ```
   #[inline]
@@ -87,7 +87,7 @@ impl ExternalDest {
   /// ```
   /// use errai::core::{ExternalDest, InternalPid};
   ///
-  /// let dest = ExternalDest::from(InternalPid::from_bits(0x123));
+  /// let dest = ExternalDest::from(InternalPid::EXAMPLE_PROC);
   /// assert!(dest.is_internal_proc());
   /// ```
   #[inline]
@@ -102,11 +102,11 @@ impl ExternalDest {
   /// ```
   /// use errai::core::{Atom, ExternalDest, ExternalPid, InternalPid};
   ///
-  /// let pid = ExternalPid::new(
-  ///   InternalPid::from_bits(0x123),
+  /// let proc = ExternalPid::new(
+  ///   InternalPid::EXAMPLE_PROC,
   ///   Atom::new("node@host")
   /// );
-  /// let dest = ExternalDest::from(pid);
+  /// let dest = ExternalDest::from(proc);
   /// assert!(dest.is_external_proc());
   /// ```
   #[inline]

@@ -29,7 +29,7 @@ use crate::core::InternalPid;
 /// use errai::core::{Atom, InternalDest, InternalPid};
 ///
 /// // Direct addressing
-/// let pid = InternalPid::from_bits(0x123);
+/// let pid = InternalPid::EXAMPLE_PROC;
 /// let dest = InternalDest::from(pid);
 /// assert!(dest.is_proc());
 ///
@@ -62,7 +62,7 @@ impl InternalDest {
   /// ```
   /// use errai::core::{InternalDest, InternalPid};
   ///
-  /// let pid = InternalPid::from_bits(0x123);
+  /// let pid = InternalPid::EXAMPLE_PROC;
   /// let dest = InternalDest::from(pid);
   /// assert!(dest.is_proc());
   /// ```

@@ -47,7 +47,11 @@ impl InternalPid {
   pub(crate) const UNDEFINED: Self = Self::from_bits(u64::MAX);
 
   /// The root process always gets the PID `0`.
-  pub(crate) const ROOT_PROC: Self = InternalPid::from_bits(0);
+  pub(crate) const ROOT_PROC: Self = Self::from_bits(0);
+
+  /// This is only here for the public examples.
+  #[doc(hidden)]
+  pub const EXAMPLE_PROC: Self = Self::from_bits(0);
 
   /// Creates an internal PID from its raw encoded bits.
   ///
