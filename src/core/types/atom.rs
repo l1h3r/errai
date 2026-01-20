@@ -74,6 +74,9 @@ use crate::raise;
 /// This table is lazily initialized on first access and ensures well-known
 /// atoms occupy their expected slot indices.
 static ATOM_TABLE: LazyLock<AtomTable> = LazyLock::new(|| {
+  // Initialize predefined atoms. Panic on failure is acceptable here
+  // because failure to initialize the atom table is fatal.
+
   let table: AtomTable = AtomTable::new();
 
   assert_eq!(table.set("").unwrap(), Atom::EMPTY.into_slot());
