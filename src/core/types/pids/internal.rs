@@ -51,7 +51,7 @@ impl InternalPid {
   /// This is used for deserialization or when reconstructing PIDs from
   /// stored data. The bits should include the tag, index, and serial fields.
   #[inline]
-  pub const fn from_bits(bits: u64) -> Self {
+  pub(crate) const fn from_bits(bits: u64) -> Self {
     Self { bits }
   }
 
@@ -59,7 +59,7 @@ impl InternalPid {
   ///
   /// This is used for serialization or when storing PIDs in compact form.
   #[inline]
-  pub const fn into_bits(self) -> u64 {
+  pub(crate) const fn into_bits(self) -> u64 {
     self.bits
   }
 }
