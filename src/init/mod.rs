@@ -150,7 +150,7 @@ fn build_tracing() -> FmtSubscriber {
     .with_ansi(true)
     .with_level(true)
     .with_line_number(true)
-    .with_max_level(Level::TRACE)
+    .with_max_level(Level::DEBUG)
     .with_target(true)
     .with_thread_ids(true)
     .with_thread_names(true)

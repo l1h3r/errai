@@ -220,9 +220,9 @@ where
   // ---------------------------------------------------------------------------
 
   if let Some(root) = parent {
-    tracing::trace!(pid = %proc.readonly.mpid, from = %root.readonly.mpid, "Proc Spawn");
+    tracing::debug!(pid = %proc.readonly.mpid, from = %root.readonly.mpid, "Proc Spawn");
   } else {
-    tracing::trace!(pid = %proc.readonly.mpid, "Proc Spawn");
+    tracing::debug!(pid = %proc.readonly.mpid, "Proc Spawn");
   }
 
   let Ok(()) = proc.readonly.task.set(task::spawn(local)) else {
