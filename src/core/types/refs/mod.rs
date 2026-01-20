@@ -42,10 +42,16 @@ macro_rules! make_ref {
 
     impl $name {
       #[doc = concat!("Creates a new `", stringify!($name), "`.")]
+      #[inline]
       pub(crate) fn new() -> Self {
         Self {
           inner: InternalRef::new_global(),
         }
+      }
+
+      #[inline]
+      pub(crate) fn global_id(&self) -> u64 {
+        self.inner.global_id()
       }
     }
 

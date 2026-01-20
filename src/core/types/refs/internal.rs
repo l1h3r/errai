@@ -35,6 +35,14 @@ static GLOBAL_REF: CachePadded<LazyLock<AtomicU64>> = CachePadded::new(LazyLock:
 ///
 /// References are generated atomically from a global counter with relaxed
 /// ordering, providing uniqueness without synchronization overhead.
+///
+/// # Layout
+///
+/// The 96-bit reference is packed as:
+///
+/// - `value[0]`: bits 0-17 of `global_id` (NUMBER_MASK)
+/// - `value[1]`: bits 18-31 of `global_id` (SERIAL_MASK) | `thread_id` (NUMBER_MASK)
+/// - `value[2]`: bits 32-63 of `global_id` (upper 32 bits)
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct InternalRef {
@@ -81,6 +89,17 @@ impl InternalRef {
   #[inline]
   pub(crate) const fn into_bits(self) -> [u32; 3] {
     self.bits
+  }
+
+  /// Extracts the `global_id` portion of the reference.
+  ///
+  /// Returns the 64-bit `global_id` that was packed during creation,
+  /// discarding the `thread_id` component.
+  #[inline]
+  pub(crate) fn global_id(&self) -> u64 {
+    (self.bits[0] as u64)
+      | ((self.bits[1] & Self::SERIAL_MASK) as u64)
+      | ((self.bits[2] as u64) << u32::BITS)
   }
 
   /// Packs global counter and thread ID into reference bit layout.
