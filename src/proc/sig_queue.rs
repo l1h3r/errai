@@ -5,7 +5,6 @@ use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::mpsc::WeakUnboundedSender;
 use tokio::sync::mpsc::error::TryRecvError;
 use triomphe::Arc;
 
@@ -227,53 +226,11 @@ impl ProcSend {
       raise!(Error, SysInv, error);
     }
   }
-
-  /// Creates a weak reference to this sender.
-  ///
-  /// Weak references don't keep the receiver alive and can be upgraded
-  /// back to a strong sender if the receiver still exists.
-  #[inline]
-  pub(crate) fn downgrade(&self) -> WeakProcSend {
-    WeakProcSend {
-      inner: self.inner.downgrade(),
-    }
-  }
 }
 
 impl Debug for ProcSend {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     f.write_str("ProcSend(..)")
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Weak Proc Send
-// -----------------------------------------------------------------------------
-
-/// Weak reference to a process signal sender.
-///
-/// Weak senders don't keep the receiver alive. They can be upgraded to
-/// strong senders if the process still exists.
-#[derive(Clone)]
-#[repr(transparent)]
-pub(crate) struct WeakProcSend {
-  inner: WeakUnboundedSender<Signal>,
-}
-
-impl WeakProcSend {
-  /// Attempts to upgrade this weak sender to a strong sender.
-  ///
-  /// Returns `None` if the process has terminated and the receiver was
-  /// dropped.
-  #[inline]
-  pub(crate) fn upgrade(&self) -> Option<ProcSend> {
-    self.inner.upgrade().map(|inner| ProcSend { inner })
-  }
-}
-
-impl Debug for WeakProcSend {
-  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-    f.write_str("WeakProcSend(..)")
   }
 }
 
