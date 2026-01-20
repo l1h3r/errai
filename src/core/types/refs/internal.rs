@@ -6,6 +6,7 @@ use std::fmt::Result;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use crate::consts;
 use crate::erts::Runtime;
 use crate::loom::sync::atomic::AtomicU64;
 use crate::loom::sync::atomic::Ordering;
@@ -119,7 +120,7 @@ impl InternalRef {
     let mut data: u64 = 0;
     data |= timestamp.as_secs();
     data |= (timestamp.subsec_micros() as u64) << 32;
-    data = data.wrapping_mul(268438039); // TODO: Magic Erlang Value
+    data = data.wrapping_mul(consts::ERL_FUNNY_NUMBER7);
     data = data.wrapping_add(timestamp.subsec_micros() as u64);
     data
   }

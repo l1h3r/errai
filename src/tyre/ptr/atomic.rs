@@ -148,12 +148,17 @@ impl<T> AtomicTaggedPtr<T> {
     let ptr_a: *mut T = current.as_ptr_tagged();
     let ptr_b: *mut T = new.as_ptr_tagged();
 
-    // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
     self
       .inner
       .compare_exchange(ptr_a, ptr_b, success, failure)
-      .map(|ptr| unsafe { TaggedPtr::new_unchecked(ptr) })
-      .map_err(|ptr| unsafe { TaggedPtr::new_unchecked(ptr) })
+      .map(|ptr| {
+        // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
+        unsafe { TaggedPtr::new_unchecked(ptr) }
+      })
+      .map_err(|ptr| {
+        // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
+        unsafe { TaggedPtr::new_unchecked(ptr) }
+      })
   }
 
   /// Stores a value into the pointer if the current value is the same as the
@@ -175,12 +180,17 @@ impl<T> AtomicTaggedPtr<T> {
     let ptr_a: *mut T = current.as_ptr_tagged();
     let ptr_b: *mut T = new.as_ptr_tagged();
 
-    // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
     self
       .inner
       .compare_exchange_weak(ptr_a, ptr_b, success, failure)
-      .map(|ptr| unsafe { TaggedPtr::new_unchecked(ptr) })
-      .map_err(|ptr| unsafe { TaggedPtr::new_unchecked(ptr) })
+      .map(|ptr| {
+        // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
+        unsafe { TaggedPtr::new_unchecked(ptr) }
+      })
+      .map_err(|ptr| {
+        // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
+        unsafe { TaggedPtr::new_unchecked(ptr) }
+      })
   }
 
   /// Fetches the value, and applies a function to it that returns an optional
@@ -204,12 +214,17 @@ impl<T> AtomicTaggedPtr<T> {
       new.map(TaggedPtr::as_ptr_tagged)
     };
 
-    // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
     self
       .inner
       .fetch_update(store_order, fetch_order, intercept)
-      .map(|ptr| unsafe { TaggedPtr::new_unchecked(ptr) })
-      .map_err(|ptr| unsafe { TaggedPtr::new_unchecked(ptr) })
+      .map(|ptr| {
+        // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
+        unsafe { TaggedPtr::new_unchecked(ptr) }
+      })
+      .map_err(|ptr| {
+        // SAFETY: `TaggedPtr<T>` is already known to have valid alignment.
+        unsafe { TaggedPtr::new_unchecked(ptr) }
+      })
   }
 
   /// Fetches the value, applies a function to it that it return a new value.

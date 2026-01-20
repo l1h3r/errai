@@ -431,11 +431,11 @@ mod tests {
   #[ignore]
   #[test]
   fn test_equality() {
-    let term1: Term = Term::new(123_i32);
-    let term2: Term = Term::new(123_i32);
-    let term3: Term = Term::new(99_i32);
+    let a: Term = Term::new(123_i32);
+    let b: Term = Term::new(123_i32);
+    let c: Term = Term::new(99_i32);
 
-    // assert_eq!(term1, term2); // TODO: uncomment when Terms are comparable
-    // assert_ne!(term1, term3); // TODO: uncomment when Terms are comparable
+    // assert_eq!(a, b); // TODO: uncomment when Terms are comparable
+    // assert_ne!(a, c); // TODO: uncomment when Terms are comparable
   }
 }

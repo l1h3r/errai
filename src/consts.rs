@@ -39,6 +39,15 @@ pub const E_CODE_FAILURE_INIT: i32 = -1;
 pub const E_CODE_FAILURE_EXEC: i32 = -2;
 
 // -----------------------------------------------------------------------------
+// System - Erlang Things
+// -----------------------------------------------------------------------------
+
+/// Erlang constant: `FUNNY_NUMBER7`.
+///
+/// REF: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/erl_term_hashing.c#L103>
+pub const ERL_FUNNY_NUMBER7: u64 = 268438039;
+
+// -----------------------------------------------------------------------------
 // System - Types
 // -----------------------------------------------------------------------------
 

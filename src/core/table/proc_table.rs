@@ -1426,7 +1426,7 @@ mod tests {
             val.write(i * THREAD_OPS + j);
           });
 
-          if let Ok(arc) = result {
+          if let Ok(_arc) = result {
             let pid = new_pid.unwrap();
             let removed = table.remove(pid);
 

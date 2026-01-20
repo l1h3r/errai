@@ -152,8 +152,12 @@ impl AtomTable {
     }
 
     // SAFETY: We just ensured the `index` is in bounds.
-    let block: &Block = unsafe { guard.arr.get_unchecked(index >> Block::BITS) };
-    let value: &'static str = unsafe { block.get_unchecked(index & Block::MASK) };
+    let value: &'static str = unsafe {
+      guard
+        .arr
+        .get_unchecked(index >> Block::BITS)
+        .get_unchecked(index & Block::MASK)
+    };
 
     Ok(value)
   }
@@ -222,8 +226,13 @@ impl AtomTable {
     // - Blocks are append-only and sized to cover all indices < `len`.
     // - The block index (`len >> Block::BITS`) and slot index (`len & Block::MASK`)
     //   therefore always refer to a valid, in-bounds location.
-    let block: &mut Block = unsafe { guard.arr.get_unchecked_mut(len >> Block::BITS) };
-    let slot: &mut &'static str = unsafe { block.get_unchecked_mut(len & Block::MASK) };
+    let slot: &mut &'static str = unsafe {
+      guard
+        .arr
+        .get_unchecked_mut(len >> Block::BITS)
+        .get_unchecked_mut(len & Block::MASK)
+    };
+
     let term: &'static str = Box::leak(Box::from(data));
 
     *slot = term;

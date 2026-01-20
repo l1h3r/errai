@@ -250,6 +250,7 @@ unsafe fn downcast_term_unchecked<T>(term: Term) -> Box<T>
 where
   T: 'static,
 {
+  // SAFETY: This is guaranteed to be safe by the caller.
   unsafe { term.downcast_unchecked() }
 }
 

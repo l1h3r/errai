@@ -95,8 +95,6 @@ macro_rules! raise {
 mod tests {
   use std::panic;
 
-  use crate::raise;
-
   #[test]
   fn test_raise_macro_badarg() {
     assert!(panic::catch_unwind(|| raise!(Error, BadArg, "test message")).is_err());
