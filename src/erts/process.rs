@@ -551,4 +551,10 @@ impl Process {
       Err(error) => raise!(Error, SysInv, error),
     }
   }
+
+  /// Returns `true` if currently in a task-local process context.
+  #[inline]
+  pub(crate) fn is_task() -> bool {
+    CONTEXT.try_with(|_| ()).is_ok()
+  }
 }

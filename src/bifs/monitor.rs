@@ -46,7 +46,7 @@ pub(crate) fn proc_monitor(this: &ProcTask, item: ExternalDest) -> MonitorRef {
         return mref; // Ignore, we can't monitor ourselves
       }
 
-      match this.internal.lock().monitor_send.entry(mref) {
+      match this.internal().monitor_send.entry(mref) {
         Entry::Occupied(_) => {
           raise!(Error, SysInv, "duplicate monitor");
         }
@@ -69,7 +69,7 @@ pub(crate) fn proc_monitor(this: &ProcTask, item: ExternalDest) -> MonitorRef {
       } else {
         let mref: MonitorRef = MonitorRef::new();
 
-        match this.internal.lock().monitor_send.entry(mref) {
+        match this.internal().monitor_send.entry(mref) {
           Entry::Occupied(_) => {
             raise!(Error, SysInv, "duplicate monitor");
           }
@@ -108,7 +108,7 @@ pub(crate) fn proc_monitor(this: &ProcTask, item: ExternalDest) -> MonitorRef {
 ///
 /// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L433>
 pub(crate) fn proc_demonitor(this: &ProcTask, mref: MonitorRef) {
-  match this.internal.lock().monitor_send.entry(mref) {
+  match this.internal().monitor_send.entry(mref) {
     Entry::Occupied(entry) => {
       let state: ProcMonitor = entry.remove();
 

@@ -1,6 +1,6 @@
 use hashbrown::HashMap;
-use parking_lot::Mutex;
 use parking_lot::RwLock;
+use std::cell::UnsafeCell;
 use std::num::NonZeroU64;
 use std::sync::OnceLock;
 use tokio::task::JoinHandle;
@@ -40,8 +40,12 @@ use crate::tyre::num::AtomicNzU64;
 /// access patterns and locking requirements:
 ///
 /// 1. **Read-only**: No lock needed, contains immutable data
-/// 2. **Internal**: Mutex-protected, contains frequently-modified state
+/// 2. **Internal**: Task-local UnsafeCell, zero-overhead access via guard
 /// 3. **External**: RwLock-protected, contains rarely-modified state
+///
+/// The internal state uses `UnsafeCell` instead of locks because it's
+/// only accessed by the owning process task. Access is mediated by
+/// `TaskGuard` which proves we're in the correct task context.
 ///
 /// # Drop Behavior
 ///
@@ -54,9 +58,17 @@ use crate::tyre::num::AtomicNzU64;
 #[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]
 pub(crate) struct ProcData {
   pub(crate) readonly: ProcReadOnly,
-  pub(crate) internal: Mutex<ProcInternal>,
+  pub(crate) internal: UnsafeCell<ProcInternal>,
   pub(crate) external: RwLock<ProcExternal>,
 }
+
+// SAFETY: ProcData is Send because we can transfer ownership between threads.
+unsafe impl Send for ProcData {}
+
+// SAFETY: ProcData is Sync because while Arc<ProcData> is accessible from
+// multiple threads, only `readonly` and `external` are accessed concurrently.
+// The `internal` field is only accessed from the owning task via TaskGuard.
+unsafe impl Sync for ProcData {}
 
 impl Drop for ProcData {
   fn drop(&mut self) {

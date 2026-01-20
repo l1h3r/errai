@@ -44,7 +44,7 @@ where
     return; // Ignore, we can't link to ourselves
   }
 
-  match this.internal.lock().links.entry(pid) {
+  match this.internal().links.entry(pid) {
     Entry::Occupied(mut entry) => {
       if entry.get().is_enabled() {
         return; // Ignore, we dont need to update an active link
@@ -90,7 +90,7 @@ where
 
   let pid: InternalPid = pid.into_internal();
 
-  match this.internal.lock().links.entry(pid) {
+  match this.internal().links.entry(pid) {
     Entry::Occupied(mut entry) => {
       if entry.get().is_disabled() {
         return; // Ignore, we've been here before

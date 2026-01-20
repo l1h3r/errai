@@ -2,10 +2,9 @@
 // Process Spawning
 // -----------------------------------------------------------------------------
 
-use parking_lot::Mutex;
-use parking_lot::MutexGuard;
 use parking_lot::RwLock;
 use parking_lot::RwLockWriteGuard;
+use std::cell::UnsafeCell;
 use std::mem::MaybeUninit;
 use std::panic::AssertUnwindSafe;
 use tokio::task;
@@ -36,6 +35,7 @@ use crate::proc::ProcReadOnly;
 use crate::proc::ProcRecv;
 use crate::proc::ProcSend;
 use crate::proc::ProcTask;
+use crate::proc::TaskGuard;
 use crate::raise;
 use crate::utils::CatchUnwind;
 
@@ -252,7 +252,7 @@ where
 /// Raises exception if the process table is full.
 fn proc_create(parent: Option<&ProcTask>, options: SpawnConfig) -> (Arc<ProcData>, ProcRecv) {
   let parent_pid: Option<InternalPid> = parent.map(|process| process.readonly.mpid);
-  let leader_pid: Option<InternalPid> = parent.map(|process| process.internal.lock().group_leader);
+  let leader_pid: Option<InternalPid> = parent.map(|process| process.internal().group_leader);
 
   let (sig_send, sig_recv): (ProcSend, ProcRecv) = proc::unbounded_channel();
 
@@ -280,7 +280,7 @@ fn proc_create(parent: Option<&ProcTask>, options: SpawnConfig) -> (Arc<ProcData
     //         the ProcTable insert callback works with MaybeUninit.
     unsafe {
       (&raw mut (*proc_state).readonly).write(readonly);
-      (&raw mut (*proc_state).internal).write(Mutex::new(internal));
+      (&raw mut (*proc_state).internal).write(UnsafeCell::new(internal));
       (&raw mut (*proc_state).external).write(RwLock::new(external));
     }
   };
@@ -313,7 +313,7 @@ pub(crate) fn proc_remove(this: &mut ProcTask) {
 
   tracing::trace!("(1) - Lock");
 
-  let mut internal: MutexGuard<'_, ProcInternal> = this.internal.lock();
+  let mut internal: TaskGuard<'_, ProcInternal> = this.internal();
   let mut external: RwLockWriteGuard<'_, ProcExternal> = this.external.write();
 
   let name: Option<Atom> = external.name.clone();
@@ -374,5 +374,5 @@ pub(crate) fn proc_remove(this: &mut ProcTask) {
 ///
 /// Returns `Some(Exit)` if the signal should terminate the process.
 fn proc_handle_signal(this: &ProcTask, signal: Signal) -> Option<Exit> {
-  signal.recv(&this.readonly, &mut this.internal.lock())
+  signal.recv(&this.readonly, &mut this.internal())
 }

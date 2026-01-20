@@ -142,7 +142,7 @@ impl ProcMail {
 
     let mut poll = |this: &ProcTask| -> Option<DynMessage> {
       debug_assert_eq!(this.readonly.mpid, pid);
-      this.internal.lock().inbox.poll(&filter, &mut marker)
+      this.internal().inbox.poll(&filter, &mut marker)
     };
 
     'poll: loop {
@@ -150,7 +150,7 @@ impl ProcMail {
         break 'poll message;
       }
 
-      Process::with(|this| Arc::clone(&this.internal.lock().inbox.notify))
+      Process::with(|this| Arc::clone(&this.internal().inbox.notify))
         .notified()
         .await;
     }

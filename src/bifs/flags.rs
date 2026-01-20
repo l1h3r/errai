@@ -12,8 +12,7 @@ use crate::proc::ProcTask;
 ///
 /// BEAM Builtin: N/A
 pub(crate) fn proc_get_flags(this: &ProcTask) -> ProcessFlags {
-  debug_assert!(!this.internal.is_locked());
-  this.internal.lock().flags
+  this.internal().flags
 }
 
 /// Sets all process flags for the calling process.
@@ -22,8 +21,7 @@ pub(crate) fn proc_get_flags(this: &ProcTask) -> ProcessFlags {
 ///
 /// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2013>
 pub(crate) fn proc_set_flags(this: &ProcTask, flags: ProcessFlags) {
-  debug_assert!(!this.internal.is_locked());
-  this.internal.lock().flags = flags;
+  this.internal().flags = flags;
 }
 
 /// Sets a single process flag to the given value.
@@ -32,6 +30,5 @@ pub(crate) fn proc_set_flags(this: &ProcTask, flags: ProcessFlags) {
 ///
 /// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2013>
 pub(crate) fn proc_set_flag(this: &ProcTask, flag: ProcessFlags, value: bool) {
-  debug_assert!(!this.internal.is_locked());
-  this.internal.lock().flags.set(flag, value);
+  this.internal().flags.set(flag, value);
 }
