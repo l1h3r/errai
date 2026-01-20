@@ -230,3 +230,169 @@ impl From<Term> for Exit {
     Self::Term(other)
   }
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use crate::core::Atom;
+  use crate::core::Exit;
+  use crate::core::Term;
+
+  #[test]
+  fn test_constants_exist() {
+    let _unused: Exit = Exit::NORMAL;
+    let _unused: Exit = Exit::KILLED;
+    let _unused: Exit = Exit::NOPROC;
+    let _unused: Exit = Exit::NOCONN;
+  }
+
+  #[test]
+  fn test_normal_is_atom() {
+    assert!(
+      matches!(Exit::NORMAL, Exit::Atom(_)),
+      "NORMAL should be Atom variant"
+    );
+  }
+
+  #[test]
+  fn test_killed_is_atom() {
+    assert!(
+      matches!(Exit::KILLED, Exit::Atom(_)),
+      "KILLED should be Atom variant"
+    );
+  }
+
+  #[test]
+  fn test_noproc_is_atom() {
+    assert!(
+      matches!(Exit::NOPROC, Exit::Atom(_)),
+      "NOPROC should be Atom variant"
+    );
+  }
+
+  #[test]
+  fn test_noconnis_atom() {
+    assert!(
+      matches!(Exit::NOCONN, Exit::Atom(_)),
+      "NOCONN should be Atom variant"
+    );
+  }
+
+  #[test]
+  fn test_is_normal() {
+    assert!(Exit::NORMAL.is_normal());
+    assert!(!Exit::KILLED.is_normal());
+    assert!(!Exit::NOPROC.is_normal());
+    assert!(!Exit::NOCONN.is_normal());
+  }
+
+  #[test]
+  fn test_is_killed() {
+    assert!(Exit::KILLED.is_killed());
+    assert!(!Exit::NORMAL.is_killed());
+    assert!(!Exit::NOPROC.is_killed());
+    assert!(!Exit::NOCONN.is_killed());
+  }
+
+  #[test]
+  fn test_is_noproc() {
+    assert!(Exit::NOPROC.is_noproc());
+    assert!(!Exit::NORMAL.is_noproc());
+    assert!(!Exit::KILLED.is_noproc());
+    assert!(!Exit::NOCONN.is_noproc());
+  }
+
+  #[test]
+  fn test_is_noconn() {
+    assert!(Exit::NOCONN.is_noconn());
+    assert!(!Exit::NORMAL.is_noconn());
+    assert!(!Exit::KILLED.is_noconn());
+    assert!(!Exit::NOPROC.is_noconn());
+  }
+
+  #[test]
+  fn test_is_normal_with_custom_atom() {
+    let exit: Exit = Exit::from(Atom::new("custom"));
+
+    assert!(!exit.is_normal());
+  }
+
+  #[test]
+  fn test_term_variant_predicates() {
+    let exit: Exit = Exit::from(Term::new("error"));
+
+    assert!(!exit.is_normal());
+    assert!(!exit.is_killed());
+    assert!(!exit.is_noproc());
+    assert!(!exit.is_noconn());
+  }
+
+  #[test]
+  fn test_from_atom() {
+    let atom: Atom = Atom::new("shutdown");
+    let exit: Exit = Exit::from(atom);
+
+    if let Exit::Atom(item) = exit {
+      assert_eq!(item, atom);
+    } else {
+      panic!("Should be Atom variant");
+    }
+  }
+
+  #[test]
+  fn test_from_well_known_atom() {
+    assert!(Exit::from(Atom::NORMAL).is_normal());
+  }
+
+  #[test]
+  fn test_from_term_integer() {
+    let term: Term = Term::new(123_u32);
+    let exit: Exit = Exit::from(term);
+
+    assert!(matches!(exit, Exit::Term(_)), "Should be Term variant");
+  }
+
+  #[test]
+  fn test_from_term_string() {
+    let term: Term = Term::new(String::from("error message"));
+    let exit: Exit = Exit::from(term);
+
+    assert!(matches!(exit, Exit::Term(_)), "Should be Term variant");
+  }
+
+  #[test]
+  fn test_clone() {
+    let src: Exit = Exit::NORMAL;
+    let dst: Exit = src.clone();
+
+    assert!(src.is_normal());
+    assert!(dst.is_normal());
+  }
+
+  #[test]
+  fn test_display() {
+    assert_eq!(format!("{}", Exit::NORMAL), "normal");
+    assert_eq!(format!("{}", Exit::KILLED), "killed");
+    assert_eq!(format!("{}", Exit::NOPROC), "noproc");
+    assert_eq!(format!("{}", Exit::NOCONN), "noconn");
+  }
+
+  #[test]
+  fn test_debug() {
+    assert_eq!(format!("{:?}", Exit::NORMAL), "normal");
+    assert_eq!(format!("{:?}", Exit::KILLED), "killed");
+    assert_eq!(format!("{:?}", Exit::NOPROC), "noproc");
+    assert_eq!(format!("{:?}", Exit::NOCONN), "noconn");
+  }
+
+  #[test]
+  fn test_custom_display() {
+    let src: Exit = Exit::Atom(Atom::new("timeout"));
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, "timeout");
+  }
+}

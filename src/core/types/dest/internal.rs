@@ -125,3 +125,134 @@ impl From<&'static str> for InternalDest {
     Self::Name(Atom::new(other))
   }
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use hashbrown::HashSet;
+
+  use crate::core::Atom;
+  use crate::core::InternalDest;
+  use crate::core::InternalPid;
+
+  #[test]
+  fn test_from_pid() {
+    let data: InternalPid = InternalPid::from_bits(0x123);
+    let dest: InternalDest = InternalDest::from(data);
+
+    assert!(
+      matches!(dest, InternalDest::Proc(inner) if inner == data),
+      "Should be Proc variant"
+    );
+  }
+
+  #[test]
+  fn test_from_atom() {
+    let data: Atom = Atom::new("logger");
+    let dest: InternalDest = InternalDest::from(data);
+
+    assert!(
+      matches!(dest, InternalDest::Name(inner) if inner == data),
+      "Should be Name variant"
+    );
+  }
+
+  #[test]
+  fn test_is_proc() {
+    let proc: InternalDest = InternalDest::from(InternalPid::from_bits(1));
+    let name: InternalDest = InternalDest::from(Atom::new("test"));
+
+    assert!(proc.is_proc());
+    assert!(!name.is_proc());
+  }
+
+  #[test]
+  fn test_is_name() {
+    let proc: InternalDest = InternalDest::from(InternalPid::from_bits(1));
+    let name: InternalDest = InternalDest::from(Atom::new("test"));
+
+    assert!(!proc.is_name());
+    assert!(name.is_name());
+  }
+
+  #[test]
+  fn test_clone() {
+    let src: InternalDest = InternalDest::from(Atom::new("test"));
+    let dst = src.clone();
+
+    if let (InternalDest::Name(atom1), InternalDest::Name(atom2)) = (src, dst) {
+      assert_eq!(atom1, atom2);
+    } else {
+      panic!("Both should be Name variant");
+    }
+  }
+
+  #[test]
+  fn test_copy() {
+    let src: InternalDest = InternalDest::from(Atom::new("test"));
+    let dst: InternalDest = src;
+
+    if let (InternalDest::Name(atom1), InternalDest::Name(atom2)) = (src, dst) {
+      assert_eq!(atom1, atom2);
+    } else {
+      panic!("Both should be Name variant");
+    }
+  }
+
+  #[test]
+  fn test_display_proc() {
+    let src: InternalDest = InternalDest::from(InternalPid::from_bits(123));
+    let fmt: String = format!("{src}");
+
+    assert!(fmt.starts_with("#PID<"));
+    assert!(fmt.ends_with(">"));
+  }
+
+  #[test]
+  fn test_display_name() {
+    let src: InternalDest = InternalDest::from(Atom::new("logger"));
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, "logger");
+  }
+
+  #[test]
+  fn test_debug_equals_display() {
+    let src: InternalDest = InternalDest::from(Atom::new("test"));
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, format!("{src:?}"));
+  }
+
+  #[test]
+  fn test_equality() {
+    let a: InternalDest = InternalDest::from(InternalPid::from_bits(100));
+    let b: InternalDest = InternalDest::from(InternalPid::from_bits(100));
+    let c: InternalDest = InternalDest::from(InternalPid::from_bits(200));
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+  }
+
+  #[test]
+  fn test_ordering() {
+    let a: InternalDest = InternalDest::from(InternalPid::from_bits(100));
+    let b: InternalDest = InternalDest::from(InternalPid::from_bits(200));
+
+    assert!(a < b);
+  }
+
+  #[test]
+  fn test_hash() {
+    let mut set: HashSet<InternalDest> = HashSet::new();
+
+    set.insert(InternalDest::from(InternalPid::from_bits(1)));
+    set.insert(InternalDest::from(Atom::new("test")));
+    set.insert(InternalDest::from(InternalPid::from_bits(1)));
+
+    assert_eq!(set.len(), 2);
+  }
+}

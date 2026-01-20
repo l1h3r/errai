@@ -96,32 +96,112 @@ impl From<NonZeroU64> for AtomicNzU64 {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
+  use std::num::NonZeroU64;
+
   use crate::loom::sync::atomic::Ordering;
   use crate::tyre::num::AtomicNzU64;
 
   #[test]
-  fn test_fetch_add_wrapping() {
-    let atomic: AtomicNzU64 = AtomicNzU64::new(1).unwrap();
-
-    let old: u64 = atomic.fetch_add(u64::MAX, Ordering::Relaxed).get();
-    assert_eq!(old, 1);
-
-    let new: u64 = atomic.load(Ordering::Relaxed).get();
-    assert_eq!(new, 1);
+  fn test_new_rejects_zero() {
+    assert!(AtomicNzU64::new(0).is_none());
   }
 
   #[test]
-  fn test_multiple_wraps() {
+  fn test_new_accepts_nonzero() {
+    assert!(AtomicNzU64::new(1).is_some());
+    assert!(AtomicNzU64::new(123).is_some());
+    assert!(AtomicNzU64::new(u64::MAX).is_some());
+  }
+
+  #[test]
+  fn test_from_nonzero() {
+    let source: NonZeroU64 = NonZeroU64::new(123).unwrap();
+    let atomic: AtomicNzU64 = AtomicNzU64::from_nonzero(source);
+
+    assert_eq!(atomic.load(Ordering::Relaxed).get(), 123);
+  }
+
+  #[test]
+  fn test_load_returns_nonzero() {
+    let atomic: AtomicNzU64 = AtomicNzU64::new(456).unwrap();
+    let loaded: NonZeroU64 = atomic.load(Ordering::Relaxed);
+
+    assert_eq!(loaded.get(), 456);
+  }
+
+  #[test]
+  fn test_default_is_one() {
+    let atomic: AtomicNzU64 = AtomicNzU64::default();
+    let loaded: NonZeroU64 = atomic.load(Ordering::Relaxed);
+
+    assert_eq!(loaded.get(), 1);
+  }
+
+  #[test]
+  fn test_fetch_add_simple() {
+    let atomic: AtomicNzU64 = AtomicNzU64::new(10).unwrap();
+
+    assert_eq!(atomic.fetch_add(5, Ordering::Relaxed).get(), 10);
+    assert_eq!(atomic.load(Ordering::Relaxed).get(), 15);
+  }
+
+  #[test]
+  fn test_fetch_add_wrapping_to_one() {
     let atomic: AtomicNzU64 = AtomicNzU64::new(1).unwrap();
 
-    for _ in 0..1000 {
-      let old: u64 = atomic.fetch_add(u64::MAX / 100, Ordering::Relaxed).get();
-      assert_ne!(old, 0);
+    assert_eq!(atomic.fetch_add(u64::MAX, Ordering::Relaxed).get(), 1);
+    assert_eq!(atomic.load(Ordering::Relaxed).get(), 1);
+  }
 
-      let new: u64 = atomic.load(Ordering::Relaxed).get();
-      assert_ne!(new, 0);
+  #[test]
+  fn test_fetch_add_near_max() {
+    let atomic: AtomicNzU64 = AtomicNzU64::new(u64::MAX - 5).unwrap();
+
+    assert_eq!(atomic.fetch_add(10, Ordering::Relaxed).get(), u64::MAX - 5);
+    assert_ne!(atomic.load(Ordering::Relaxed).get(), 0);
+  }
+
+  #[test]
+  fn test_fetch_add_multiple_wraps() {
+    let atomic: AtomicNzU64 = AtomicNzU64::new(u64::MAX - 1).unwrap();
+
+    for _ in 0..1000 {
+      assert_ne!(atomic.fetch_add(u64::MAX / 10, Ordering::Relaxed).get(), 0);
+      assert_ne!(atomic.load(Ordering::Relaxed).get(), 0);
     }
+  }
+
+  #[test]
+  fn test_fetch_add_preserves_nonzero() {
+    let atomic: AtomicNzU64 = AtomicNzU64::new(100).unwrap();
+
+    for index in 1..100 {
+      let _pass: NonZeroU64 = atomic.fetch_add(index, Ordering::Relaxed);
+      let value: NonZeroU64 = atomic.load(Ordering::Relaxed);
+
+      assert_ne!(value.get(), 0, "Value became zero at iteration {index}");
+    }
+  }
+
+  #[test]
+  fn test_debug() {
+    let atomic: AtomicNzU64 = AtomicNzU64::new(789).unwrap();
+    let format: String = format!("{:?}", atomic);
+
+    assert!(format.contains("789"));
+  }
+
+  #[test]
+  fn test_from() {
+    let source: NonZeroU64 = NonZeroU64::new(321).unwrap();
+    let atomic: AtomicNzU64 = source.into();
+
+    assert_eq!(atomic.load(Ordering::Relaxed).get(), 321);
   }
 }

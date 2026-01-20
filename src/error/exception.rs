@@ -96,8 +96,69 @@ impl Debug for Exception {
 
 impl Display for Exception {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-    write!(f, "{}:{} - {}", self.class, self.group, self.error)
+    write!(f, "{}:{} - {}", self.class, self.group.label(), self.error)
   }
 }
 
 impl Error for Exception {}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use std::backtrace::Backtrace;
+
+  use crate::error::Exception;
+  use crate::error::ExceptionClass;
+  use crate::error::ExceptionGroup;
+
+  #[test]
+  fn test_new() {
+    let exception: Exception = Exception::new(
+      ExceptionClass::Error,
+      ExceptionGroup::BadArg,
+      "error message",
+    );
+
+    assert_eq!(exception.class(), ExceptionClass::Error);
+    assert_eq!(exception.group(), ExceptionGroup::BadArg);
+    assert_eq!(exception.error(), "error message");
+  }
+
+  #[test]
+  fn test_captures_backtrace() {
+    let exception: Exception =
+      Exception::new(ExceptionClass::Error, ExceptionGroup::BadArg, "test");
+
+    // Just verify we can access the backtrace without panic
+    let _ignore: &Backtrace = exception.trace();
+  }
+
+  #[test]
+  fn test_display() {
+    let src: Exception = Exception::new(
+      ExceptionClass::Error,
+      ExceptionGroup::BadArg,
+      "error message",
+    );
+
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, "error:badarg - error message");
+  }
+
+  #[test]
+  fn test_debug_equals_display() {
+    let src: Exception = Exception::new(
+      ExceptionClass::Error,
+      ExceptionGroup::SysCap,
+      "capacity exceeded",
+    );
+
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, format!("{src:?}"));
+  }
+}

@@ -56,7 +56,7 @@ pub const MAX_ATOM_CHARS: usize = 255;
 ///
 /// [`Atom`]: crate::core::Atom
 /// [`AtomTooLarge`]: crate::core::AtomTableError::AtomTooLarge
-pub const MAX_ATOM_BYTES: usize = MAX_ATOM_CHARS.strict_mul(4);
+pub const MAX_ATOM_BYTES: usize = MAX_ATOM_CHARS.strict_mul(size_of::<char>());
 
 /// Maximum number of [`Atom`]s that can be stored in the atom table.
 ///
@@ -174,3 +174,70 @@ pub const MAX_REGISTERED_PROCS: usize = ProcTable::<()>::DEF_ENTRIES;
 
 /// Initial capacity of the process name registry.
 pub const CAP_REGISTERED_NAMES: usize = ProcTable::<()>::MIN_ENTRIES;
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use crate::consts::*;
+
+  #[test]
+  fn test_exit_codes_are_distinct() {
+    assert_ne!(E_CODE_SUCCESS, E_CODE_FAILURE_INIT);
+    assert_ne!(E_CODE_SUCCESS, E_CODE_FAILURE_EXEC);
+    assert_ne!(E_CODE_FAILURE_INIT, E_CODE_FAILURE_EXEC);
+  }
+
+  #[test]
+  fn test_exit_code_success_is_zero() {
+    assert_eq!(E_CODE_SUCCESS, 0);
+  }
+
+  #[test]
+  fn test_exit_codes_are_negative() {
+    assert!(E_CODE_FAILURE_INIT < 0);
+    assert!(E_CODE_FAILURE_EXEC < 0);
+  }
+
+  #[test]
+  fn test_max_atom_count_is_power_of_two() {
+    assert!(MAX_ATOM_COUNT.is_power_of_two());
+  }
+
+  #[test]
+  fn test_scheduler_intervals_are_reasonable() {
+    assert!(DEFAULT_EVENT_INTERVAL > 0);
+    assert!(DEFAULT_EVENT_INTERVAL < 1000);
+
+    assert!(DEFAULT_GLOBAL_QUEUE_INTERVAL > 0);
+    assert!(DEFAULT_GLOBAL_QUEUE_INTERVAL < DEFAULT_EVENT_INTERVAL);
+  }
+
+  #[test]
+  fn test_max_blocking_threads_is_reasonable() {
+    assert!(DEFAULT_MAX_BLOCKING_THREADS > 0);
+    assert!(DEFAULT_MAX_BLOCKING_THREADS <= 1024);
+  }
+
+  #[test]
+  fn test_thread_stack_size_is_reasonable() {
+    assert!(DEFAULT_THREAD_STACK_SIZE >= 1024 * 1024);
+    assert!(DEFAULT_THREAD_STACK_SIZE <= 1024 * 1024 * 8);
+  }
+
+  #[test]
+  fn test_shutdown_timeout_is_reasonable() {
+    assert!(SHUTDOWN_TIMEOUT.as_secs() >= 5);
+    assert!(SHUTDOWN_TIMEOUT.as_secs() <= 300);
+  }
+
+  #[test]
+  fn test_capacity_constants_are_powers_of_two() {
+    assert!(CAP_PROC_DICTIONARY.is_power_of_two());
+    assert!(CAP_PROC_MSG_BUFFER.is_power_of_two());
+    assert!(MAX_REGISTERED_PROCS.is_power_of_two());
+    assert!(CAP_REGISTERED_NAMES.is_power_of_two());
+  }
+}

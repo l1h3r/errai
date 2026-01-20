@@ -4,11 +4,11 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 use std::sync::LazyLock;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::erts::Runtime;
+use crate::loom::sync::atomic::AtomicU64;
+use crate::loom::sync::atomic::Ordering;
 
 /// Global reference counter initialized with timestamp-based seed.
 ///
@@ -119,5 +119,64 @@ impl Display for InternalRef {
       "#Ref<0.{}.{}.{}>",
       self.bits[2], self.bits[1], self.bits[0],
     )
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use crate::core::InternalRef;
+
+  const BITS: [u32; 3] = [1, 2, 3];
+
+  #[test]
+  fn test_new_global() {
+    let ref1: InternalRef = InternalRef::new_global();
+    let ref2: InternalRef = InternalRef::new_global();
+
+    assert_ne!(ref1, ref2);
+  }
+
+  #[test]
+  fn test_into_bits() {
+    let iref: InternalRef = InternalRef::from_bits(BITS);
+    let bits: [u32; 3] = iref.into_bits();
+
+    assert_eq!(bits, BITS);
+  }
+
+  #[test]
+  fn test_clone() {
+    let src: InternalRef = InternalRef::from_bits(BITS);
+    let dst: InternalRef = src.clone();
+
+    assert_eq!(src, dst);
+  }
+
+  #[test]
+  fn test_copy() {
+    let src: InternalRef = InternalRef::from_bits(BITS);
+    let dst: InternalRef = src;
+
+    assert_eq!(src, dst);
+  }
+
+  #[test]
+  fn test_display() {
+    let src: InternalRef = InternalRef::from_bits(BITS);
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, "#Ref<0.3.2.1>");
+  }
+
+  #[test]
+  fn test_debug_equals_display() {
+    let src: InternalRef = InternalRef::from_bits(BITS);
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, format!("{src:?}"));
   }
 }

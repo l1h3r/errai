@@ -239,7 +239,7 @@ impl Atom {
 
 impl Debug for Atom {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-    Debug::fmt(self.as_str(), f)
+    Display::fmt(self, f)
   }
 }
 
@@ -572,5 +572,154 @@ impl PartialEq<Atom> for &OsStr {
   #[inline]
   fn eq(&self, other: &Atom) -> bool {
     *self == OsStr::new(other)
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use hashbrown::HashSet;
+
+  use crate::core::Atom;
+
+  // #[test]
+  // fn test_well_known_atoms_have_correct_values() {
+  //   assert_eq!(Atom::EMPTY.as_str(), "");
+  //   assert_eq!(Atom::NORMAL.as_str(), "normal");
+  //   assert_eq!(Atom::KILL.as_str(), "kill");
+  //   assert_eq!(Atom::KILLED.as_str(), "killed");
+  //   assert_eq!(Atom::NOPROC.as_str(), "noproc");
+  //   assert_eq!(Atom::NOCONN.as_str(), "noconn");
+  //   assert_eq!(Atom::UNDEFINED.as_str(), "undefined");
+  // }
+
+  #[test]
+  fn test_new() {
+    let atom: Atom = Atom::new("test");
+    assert_eq!(atom.as_str(), "test");
+  }
+
+  #[test]
+  fn test_new_empty_string() {
+    let atom: Atom = Atom::new("");
+    assert_eq!(atom.as_str(), "");
+    assert_eq!(atom, Atom::EMPTY);
+  }
+
+  #[test]
+  fn test_new_unicode() {
+    let atom: Atom = Atom::new("こんにちは");
+    assert_eq!(atom.as_str(), "こんにちは");
+  }
+
+  #[test]
+  fn test_new_emoji() {
+    let atom: Atom = Atom::new("🦀");
+    assert_eq!(atom.as_str(), "🦀");
+  }
+
+  #[test]
+  #[should_panic]
+  fn test_new_too_long() {
+    Atom::new(&"🦀".repeat(256));
+  }
+
+  #[test]
+  fn test_interning() {
+    let a: Atom = Atom::new("hello");
+    let b: Atom = Atom::new("hello");
+    let c: Atom = Atom::new("world");
+
+    assert_eq!(a.into_slot(), b.into_slot());
+    assert_ne!(a.into_slot(), c.into_slot());
+  }
+
+  #[test]
+  fn test_from_str() {
+    let atom: Atom = Atom::from("test");
+    assert_eq!(atom.as_str(), "test");
+  }
+
+  #[test]
+  fn test_from_string() {
+    let atom: Atom = Atom::from("test".to_string());
+    assert_eq!(atom.as_str(), "test");
+  }
+
+  #[test]
+  fn test_clone() {
+    let src: Atom = Atom::new("test");
+    let dst: Atom = src.clone();
+
+    assert_eq!(src, dst);
+  }
+
+  #[test]
+  fn test_copy() {
+    let src: Atom = Atom::new("test");
+    let dst: Atom = src;
+
+    assert_eq!(src, dst);
+  }
+
+  #[test]
+  fn test_display() {
+    let src: Atom = Atom::new("display_test");
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, "display_test");
+  }
+
+  #[test]
+  fn test_debug_equals_display() {
+    let src: Atom = Atom::new("debug_test");
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, format!("{src:?}"));
+  }
+
+  #[test]
+  fn test_equality() {
+    let a: Atom = Atom::new("foo");
+    let b: Atom = Atom::new("foo");
+    let c: Atom = Atom::new("bar");
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+  }
+
+  #[test]
+  fn test_equality_with_str() {
+    let atom: Atom = Atom::new("test");
+
+    assert_eq!(atom, "test");
+    assert_ne!(atom, "other");
+  }
+
+  #[test]
+  fn test_ordering() {
+    let a: Atom = Atom::new("apple");
+    let b: Atom = Atom::new("banana");
+    let c: Atom = Atom::new("cherry");
+
+    assert!(a < b);
+    assert!(b < c);
+    assert!(a < c);
+  }
+
+  #[test]
+  fn test_hash() {
+    let mut set: HashSet<Atom> = HashSet::new();
+
+    set.insert(Atom::new("one"));
+    set.insert(Atom::new("two"));
+    set.insert(Atom::new("one"));
+
+    assert_eq!(set.len(), 2);
+    assert!(set.contains(&Atom::new("one")));
+    assert!(set.contains(&Atom::new("two")));
   }
 }

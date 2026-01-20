@@ -86,3 +86,29 @@ macro_rules! raise {
     )
   };
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use std::panic;
+
+  use crate::raise;
+
+  #[test]
+  fn test_raise_macro_badarg() {
+    assert!(panic::catch_unwind(|| raise!(Error, BadArg, "test message")).is_err());
+  }
+
+  #[test]
+  fn test_raise_macro_syscap() {
+    assert!(panic::catch_unwind(|| raise!(Error, SysCap, "table full")).is_err());
+  }
+
+  #[test]
+  fn test_raise_macro_sysinv() {
+    assert!(panic::catch_unwind(|| raise!(Error, SysInv, "invalid state")).is_err());
+  }
+}

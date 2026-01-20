@@ -268,3 +268,82 @@ impl<T> From<TaggedPtr<T>> for AtomicTaggedPtr<T> {
     AtomicTaggedPtr::from_tagged(other)
   }
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use std::ptr;
+
+  use crate::loom::sync::atomic::Ordering;
+  use crate::tyre::ptr::AtomicTaggedPtr;
+  use crate::tyre::ptr::TaggedPtr;
+
+  #[repr(align(8))]
+  struct Aligned(u64);
+
+  #[test]
+  fn test_null() {
+    let atomic: AtomicTaggedPtr<Aligned> = AtomicTaggedPtr::null();
+    let loaded: TaggedPtr<Aligned> = atomic.load(Ordering::Relaxed);
+
+    assert!(loaded.is_null());
+  }
+
+  #[test]
+  fn test_store_load() {
+    let mut data: Aligned = Aligned(123);
+    let raw: *mut Aligned = ptr::from_mut(&mut data);
+    let ptr: TaggedPtr<Aligned> = TaggedPtr::with(raw, 3).unwrap();
+
+    let atomic: AtomicTaggedPtr<Aligned> = AtomicTaggedPtr::null();
+
+    atomic.store(ptr, Ordering::Relaxed);
+
+    assert_eq!(atomic.load(Ordering::Relaxed).tag(), 3);
+
+    unsafe {
+      assert_eq!((*atomic.load(Ordering::Relaxed).as_ptr()).0, 123);
+    }
+  }
+
+  #[test]
+  fn test_swap() {
+    let mut data1: Aligned = Aligned(12);
+    let mut data2: Aligned = Aligned(34);
+
+    let raw1: *mut Aligned = ptr::from_mut(&mut data1);
+    let raw2: *mut Aligned = ptr::from_mut(&mut data2);
+
+    let ptr1: TaggedPtr<Aligned> = TaggedPtr::with(raw1, 1).unwrap();
+    let ptr2: TaggedPtr<Aligned> = TaggedPtr::with(raw2, 2).unwrap();
+
+    let atomic: AtomicTaggedPtr<Aligned> = AtomicTaggedPtr::from_tagged(ptr1);
+    let atomic_swap: TaggedPtr<Aligned> = atomic.swap(ptr2, Ordering::Relaxed);
+
+    assert_eq!(atomic_swap.tag(), 1);
+    assert_eq!(atomic.load(Ordering::Relaxed).tag(), 2);
+  }
+
+  #[test]
+  fn test_compare_exchange() {
+    let mut data: Aligned = Aligned(123);
+    let raw: *mut Aligned = ptr::from_mut(&mut data);
+    let ptr: TaggedPtr<Aligned> = TaggedPtr::with(raw, 5).unwrap();
+
+    let atomic: AtomicTaggedPtr<Aligned> = AtomicTaggedPtr::from_tagged(ptr);
+
+    let result: Result<TaggedPtr<Aligned>, TaggedPtr<Aligned>> =
+      atomic.compare_exchange(ptr, TaggedPtr::null(), Ordering::Relaxed, Ordering::Relaxed);
+
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().tag(), 5);
+
+    let result: Result<TaggedPtr<Aligned>, TaggedPtr<Aligned>> =
+      atomic.compare_exchange(ptr, TaggedPtr::null(), Ordering::Relaxed, Ordering::Relaxed);
+
+    assert!(result.is_err());
+  }
+}

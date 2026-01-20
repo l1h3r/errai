@@ -20,3 +20,17 @@ impl Display for ExceptionClass {
     }
   }
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use crate::error::ExceptionClass;
+
+  #[test]
+  fn test_display() {
+    assert_eq!(format!("{}", ExceptionClass::Error), "error");
+  }
+}

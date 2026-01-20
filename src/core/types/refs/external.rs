@@ -71,3 +71,57 @@ impl From<(InternalRef, Atom)> for ExternalRef {
     Self::new(other.0, other.1)
   }
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use crate::core::Atom;
+  use crate::core::ExternalRef;
+  use crate::core::InternalRef;
+
+  const IREF: InternalRef = InternalRef::from_bits([1, 2, 3]);
+  const NODE: Atom = Atom::UNDEFINED;
+
+  #[test]
+  fn test_new() {
+    let eref: ExternalRef = ExternalRef::new(IREF, NODE);
+
+    assert_eq!(eref.bits(), IREF);
+    assert_eq!(eref.node(), NODE);
+  }
+
+  #[test]
+  fn test_clone() {
+    let src: ExternalRef = ExternalRef::new(IREF, NODE);
+    let dst: ExternalRef = src.clone();
+
+    assert_eq!(src, dst);
+  }
+
+  #[test]
+  fn test_copy() {
+    let src: ExternalRef = ExternalRef::new(IREF, NODE);
+    let dst: ExternalRef = src;
+
+    assert_eq!(src, dst);
+  }
+
+  #[test]
+  fn test_display() {
+    let src: ExternalRef = ExternalRef::new(IREF, NODE);
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, "#Ref<6.3.2.1>");
+  }
+
+  #[test]
+  fn test_debug_equals_display() {
+    let src: ExternalRef = ExternalRef::new(IREF, NODE);
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, format!("{src:?}"));
+  }
+}

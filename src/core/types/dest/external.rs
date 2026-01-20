@@ -228,3 +228,63 @@ impl From<(&'static str, &'static str)> for ExternalDest {
     Self::ExternalName(Atom::new(other.0), Atom::new(other.1))
   }
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use crate::core::Atom;
+  use crate::core::ExternalDest;
+  use crate::core::InternalPid;
+
+  #[test]
+  fn test_clone() {
+    let src: ExternalDest = ExternalDest::from(Atom::new("test"));
+    let dst = src.clone();
+
+    if let (ExternalDest::InternalName(atom1), ExternalDest::InternalName(atom2)) = (src, dst) {
+      assert_eq!(atom1, atom2);
+    } else {
+      panic!("Both should be InternalName variant");
+    }
+  }
+
+  #[test]
+  fn test_copy() {
+    let src: ExternalDest = ExternalDest::from(Atom::new("test"));
+    let dst: ExternalDest = src;
+
+    if let (ExternalDest::InternalName(atom1), ExternalDest::InternalName(atom2)) = (src, dst) {
+      assert_eq!(atom1, atom2);
+    } else {
+      panic!("Both should be InternalName variant");
+    }
+  }
+
+  #[test]
+  fn test_display_proc() {
+    let src: ExternalDest = ExternalDest::from(InternalPid::from_bits(123));
+    let fmt: String = format!("{src}");
+
+    assert!(fmt.starts_with("#PID<"));
+    assert!(fmt.ends_with(">"));
+  }
+
+  #[test]
+  fn test_display_name() {
+    let src: ExternalDest = ExternalDest::from(Atom::new("logger"));
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, "logger");
+  }
+
+  #[test]
+  fn test_debug_equals_display() {
+    let src: ExternalDest = ExternalDest::from(Atom::new("test"));
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, format!("{src:?}"));
+  }
+}

@@ -24,7 +24,7 @@ pub enum ExceptionGroup {
 
 impl ExceptionGroup {
   #[inline]
-  const fn label(&self) -> &'static str {
+  pub(crate) const fn label(&self) -> &'static str {
     match self {
       Self::BadArg => "badarg",
       Self::SysCap => "syscap",
@@ -40,5 +40,25 @@ impl Display for ExceptionGroup {
       Self::SysCap => f.write_str("(SysCap) a system limit has been reached"),
       Self::SysInv => f.write_str("(SysInv) a system invariant has been broken"),
     }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use crate::error::ExceptionGroup;
+
+  #[test]
+  fn test_display() {
+    let badarg: String = format!("{}", ExceptionGroup::BadArg);
+    let syscap: String = format!("{}", ExceptionGroup::SysCap);
+    let sysinv: String = format!("{}", ExceptionGroup::SysInv);
+
+    assert!(badarg.starts_with("(BadArg)"));
+    assert!(syscap.starts_with("(SysCap)"));
+    assert!(sysinv.starts_with("(SysInv)"));
   }
 }

@@ -43,3 +43,31 @@ where
     panic::catch_unwind(assert)?.map(Ok)
   }
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use std::future;
+
+  use crate::utils::CatchUnwind;
+
+  #[tokio::test]
+  async fn test_success() {
+    let future: _ = future::ready(123);
+    let result: Result<u32, _> = CatchUnwind::new(future).await;
+
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), 123);
+  }
+
+  #[tokio::test]
+  async fn test_failure() {
+    let future: _ = async { panic!("test panic") };
+    let result: Result<(), _> = CatchUnwind::new(future).await;
+
+    assert!(result.is_err());
+  }
+}

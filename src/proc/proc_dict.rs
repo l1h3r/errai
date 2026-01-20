@@ -133,3 +133,192 @@ impl Debug for ProcDict {
     }
   }
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use crate::core::Atom;
+  use crate::core::Term;
+  use crate::proc::ProcDict;
+
+  #[test]
+  fn test_new_dict_is_empty() {
+    let dict: ProcDict = ProcDict::new();
+    let item: Option<Term> = dict.get(&Atom::new("nonexistent"));
+
+    assert!(item.is_none());
+  }
+
+  #[test]
+  fn test_lazy_allocation() {
+    let dict: ProcDict = ProcDict::new();
+
+    assert!(dict.keys().is_empty());
+    assert!(dict.values().is_empty());
+    assert!(dict.pairs().is_empty());
+  }
+
+  #[test]
+  fn test_insert_and_get() {
+    let mut dict: ProcDict = ProcDict::new();
+    let name: Atom = Atom::new("name");
+    let data: Term = Term::new(Atom::new("data"));
+
+    let prev: Option<Term> = dict.insert(name, data.clone());
+    assert!(prev.is_none());
+
+    let item: Option<Term> = dict.get(&name);
+    assert!(item.is_some());
+    // assert_eq!(item.unwrap(), data); // TODO: uncomment when Terms are comparable
+  }
+
+  #[test]
+  fn test_insert_replaces_old_value() {
+    let mut dict: ProcDict = ProcDict::new();
+    let name: Atom = Atom::new("name");
+
+    let v1: Term = Term::new(Atom::new("v1"));
+    let v2: Term = Term::new(Atom::new("v2"));
+
+    let _old: Option<Term> = dict.insert(name, v1.clone());
+    let item: Option<Term> = dict.insert(name, v2.clone());
+
+    assert!(item.is_some());
+    // assert_eq!(item.unwrap(), v1); // TODO: uncomment when Terms are comparable
+    // assert_eq!(dict.get(&name).unwrap(), v2); // TODO: uncomment when Terms are comparable
+  }
+
+  #[test]
+  fn test_remove() {
+    let mut dict: ProcDict = ProcDict::new();
+    let name: Atom = Atom::new("name");
+    let data: Term = Term::new(Atom::new("data"));
+
+    dict.insert(name, data.clone());
+
+    let item: Option<Term> = dict.remove(&name);
+
+    assert!(item.is_some());
+    assert!(dict.get(&name).is_none());
+    // assert_eq!(item.unwrap(), data); // TODO: uncomment when Terms are comparable
+  }
+
+  #[test]
+  fn test_remove_nonexistent() {
+    let mut dict: ProcDict = ProcDict::new();
+    let item: Option<Term> = dict.remove(&Atom::new("nonexistent"));
+
+    assert!(item.is_none());
+  }
+
+  #[test]
+  fn test_clear() {
+    let mut dict: ProcDict = ProcDict::new();
+
+    dict.insert(Atom::new("k1"), Term::new(Atom::new("v1")));
+    dict.insert(Atom::new("k2"), Term::new(Atom::new("v2")));
+
+    let pairs: Vec<(Atom, Term)> = dict.clear();
+
+    assert_eq!(pairs.len(), 2);
+    assert!(dict.get(&Atom::new("k1")).is_none());
+    assert!(dict.get(&Atom::new("k2")).is_none());
+  }
+
+  #[test]
+  fn test_clear_empty_dict() {
+    let mut dict: ProcDict = ProcDict::new();
+    let pairs: Vec<(Atom, Term)> = dict.clear();
+
+    assert!(pairs.is_empty());
+  }
+
+  #[test]
+  fn test_keys() {
+    let mut dict: ProcDict = ProcDict::new();
+
+    let k1: Atom = Atom::new("k1");
+    let k2: Atom = Atom::new("k2");
+
+    dict.insert(k1, Term::new(Atom::EMPTY));
+    dict.insert(k2, Term::new(Atom::EMPTY));
+
+    let keys: Vec<Atom> = dict.keys();
+
+    assert_eq!(keys.len(), 2);
+    assert!(keys.contains(&k1));
+    assert!(keys.contains(&k2));
+  }
+
+  #[test]
+  fn test_values() {
+    let mut dict: ProcDict = ProcDict::new();
+
+    let v1: Term = Term::new(Atom::new("v1"));
+    let v2: Term = Term::new(Atom::new("v2"));
+
+    dict.insert(Atom::new("k1"), v1.clone());
+    dict.insert(Atom::new("k2"), v2.clone());
+
+    let values: Vec<Term> = dict.values();
+
+    assert_eq!(values.len(), 2);
+    // assert!(values.contains(&v1)); // TODO: uncomment when Terms are comparable
+    // assert!(values.contains(&v2)); // TODO: uncomment when Terms are comparable
+  }
+
+  #[test]
+  fn test_pairs() {
+    let mut dict: ProcDict = ProcDict::new();
+
+    let name: Atom = Atom::new("name");
+    let data: Term = Term::new(Atom::new("data"));
+
+    dict.insert(name, data.clone());
+
+    let pairs: Vec<(Atom, Term)> = dict.pairs();
+
+    assert_eq!(pairs.len(), 1);
+    // assert_eq!(pairs[0], (name, data)); // TODO: uncomment when Terms are comparable
+  }
+
+  #[test]
+  fn test_multiple_operations() {
+    let mut dict: ProcDict = ProcDict::new();
+
+    for index in 0..10 {
+      let name: Atom = Atom::new(&format!("name{index}"));
+      let data: Term = Term::new(Atom::new(&format!("data{index}")));
+      dict.insert(name, data);
+    }
+
+    assert_eq!(dict.keys().len(), 10);
+
+    for index in 0..5 {
+      dict.remove(&Atom::new(&format!("name{index}")));
+    }
+
+    assert_eq!(dict.keys().len(), 5);
+  }
+
+  #[test]
+  fn test_debug_format_empty() {
+    let dict: ProcDict = ProcDict::new();
+    let data: String = format!("{:?}", dict);
+
+    assert_eq!(data, "ProcDict {}");
+  }
+
+  #[test]
+  fn test_debug_format_with_data() {
+    let mut dict: ProcDict = ProcDict::new();
+    dict.insert(Atom::new("key"), Term::new(Atom::new("value")));
+
+    let data: String = format!("{:?}", dict);
+
+    assert_eq!(data, "ProcDict {key: value}");
+  }
+}

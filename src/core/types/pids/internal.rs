@@ -29,7 +29,7 @@ impl InternalPid {
   pub(crate) const TAG_BITS: u32 = 4;
 
   /// Bit width of the PID data fields (excluding tag).
-  pub(crate) const PID_BITS: u32 = u32::BITS - Self::TAG_BITS;
+  pub(crate) const PID_BITS: u32 = u64::BITS - Self::TAG_BITS;
 
   /// Tag value identifying this as a PID type.
   pub(crate) const TAG_DATA: u64 = (0x0 << Self::TAG_BITS) | 0x3;
@@ -96,5 +96,101 @@ impl ProcessId for InternalPid {
   #[inline]
   fn into_external(self) -> Option<ExternalPid> {
     None
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use hashbrown::HashSet;
+
+  use crate::core::InternalPid;
+
+  #[test]
+  fn test_layout_constants() {
+    assert_eq!(
+      InternalPid::NUMBER_BITS + InternalPid::SERIAL_BITS,
+      (8 * size_of::<InternalPid>() as u32) - InternalPid::TAG_BITS,
+    );
+  }
+
+  #[test]
+  fn test_undefined() {
+    assert_eq!(InternalPid::UNDEFINED.into_bits(), u64::MAX);
+  }
+
+  #[test]
+  fn test_from_bits_roundtrip() {
+    let src: u64 = 0x1234_5678_9ABC_DEF0;
+    let pid: InternalPid = InternalPid::from_bits(src);
+
+    assert_eq!(pid.into_bits(), src);
+  }
+
+  #[test]
+  fn test_clone() {
+    let src: InternalPid = InternalPid::from_bits(123);
+    let dst: InternalPid = src.clone();
+
+    assert_eq!(src, dst);
+  }
+
+  #[test]
+  fn test_copy() {
+    let src: InternalPid = InternalPid::from_bits(123);
+    let dst: InternalPid = src;
+
+    assert_eq!(src, dst);
+  }
+
+  #[test]
+  fn test_display() {
+    let src: InternalPid = InternalPid::from_bits(123);
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, "#PID<0.x.x>");
+  }
+
+  #[test]
+  fn test_debug_equals_display() {
+    let src: InternalPid = InternalPid::from_bits(123);
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, format!("{src:?}"));
+  }
+
+  #[test]
+  fn test_equality() {
+    let a: InternalPid = InternalPid::from_bits(100);
+    let b: InternalPid = InternalPid::from_bits(100);
+    let c: InternalPid = InternalPid::from_bits(200);
+
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+  }
+
+  #[test]
+  fn test_ordering() {
+    let a: InternalPid = InternalPid::from_bits(100);
+    let b: InternalPid = InternalPid::from_bits(200);
+    let c: InternalPid = InternalPid::from_bits(300);
+
+    assert!(a < b);
+    assert!(b < c);
+    assert!(a < c);
+  }
+
+  #[test]
+  fn test_hash() {
+    let mut set: HashSet<InternalPid> = HashSet::new();
+
+    set.insert(InternalPid::from_bits(1));
+    set.insert(InternalPid::from_bits(2));
+    set.insert(InternalPid::from_bits(1));
+
+    assert_eq!(set.len(), 2);
   }
 }

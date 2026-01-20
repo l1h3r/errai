@@ -445,3 +445,99 @@ impl<T> From<TaggedPtr<T>> for AtomicPtr<T> {
     AtomicPtr::new(other.as_ptr_tagged())
   }
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use std::ptr;
+
+  use crate::tyre::ptr::TaggedPtr;
+
+  #[repr(align(8))]
+  struct Aligned(u64);
+
+  #[test]
+  fn test_null() {
+    assert!(TaggedPtr::<Aligned>::null().is_null());
+  }
+
+  #[test]
+  fn test_is_valid_for_aligned_type() {
+    assert!(TaggedPtr::<Aligned>::is_valid());
+    assert!(TaggedPtr::<u64>::is_valid());
+  }
+
+  #[test]
+  fn test_tag_storage() {
+    let mut data: Aligned = Aligned(123);
+    let raw: *mut Aligned = ptr::from_mut(&mut data);
+    let ptr: TaggedPtr<Aligned> = TaggedPtr::new(raw).unwrap();
+    let new: TaggedPtr<Aligned> = ptr.set(5);
+
+    assert_eq!(new.tag(), 5);
+    assert_eq!(new.del().tag(), 0);
+  }
+
+  #[test]
+  fn test_tag_mask_properties() {
+    assert_eq!(
+      TaggedPtr::<Aligned>::TAG_MASK.count_ones(),
+      TaggedPtr::<Aligned>::BITS
+    );
+
+    assert_eq!(
+      TaggedPtr::<Aligned>::TAG_MASK | TaggedPtr::<Aligned>::PTR_MASK,
+      usize::MAX
+    );
+  }
+
+  #[test]
+  fn test_tag_truncation() {
+    let mut data: Aligned = Aligned(0);
+    let raw: *mut Aligned = ptr::from_mut(&mut data);
+    let ptr: TaggedPtr<Aligned> = TaggedPtr::new(raw).unwrap();
+    let max: u8 = (1u8 << TaggedPtr::<Aligned>::BITS) - 1;
+
+    assert_eq!(ptr.set(max).tag(), max);
+    assert_eq!(ptr.set(max + 1).tag(), 0);
+  }
+
+  #[test]
+  fn test_pointer_value_preserved() {
+    let mut data: Aligned = Aligned(123);
+    let raw: *mut Aligned = ptr::from_mut(&mut data);
+    let ptr: TaggedPtr<Aligned> = TaggedPtr::new(raw).unwrap();
+
+    let tagged: TaggedPtr<Aligned> = ptr.set(3);
+    let source: TaggedPtr<Aligned> = tagged.del();
+
+    unsafe {
+      assert_eq!((*source.as_ptr()).0, 123);
+    }
+  }
+
+  #[test]
+  fn test_null_with_tag() {
+    let ptr: TaggedPtr<Aligned> = TaggedPtr::new(ptr::null_mut()).unwrap();
+    let new: TaggedPtr<Aligned> = ptr.set(7);
+
+    assert_eq!(new.tag(), 7);
+    assert!(new.is_null());
+  }
+
+  #[test]
+  fn test_with_constructor() {
+    let mut data: Aligned = Aligned(123);
+    let raw: *mut Aligned = ptr::from_mut(&mut data);
+    let ptr: TaggedPtr<Aligned> = TaggedPtr::with(raw, 4).unwrap();
+
+    assert_eq!(ptr.tag(), 4);
+
+    unsafe {
+      assert_eq!((*ptr.as_ptr()).0, 123);
+    }
+  }
+}
