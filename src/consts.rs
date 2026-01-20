@@ -108,17 +108,17 @@ pub const DEFAULT_PARALLELISM: usize = 1;
 
 /// Scheduler ticks between polling for external events.
 ///
-/// The scheduler checks for I/O events and external wakeups every 61 ticks.
+/// The scheduler checks for I/O events and external wakeups every 255 ticks.
 /// Lower values improve responsiveness but increase polling overhead. Higher
 /// values reduce overhead but may delay event processing.
-pub const DEFAULT_EVENT_INTERVAL: u32 = 61;
+pub const DEFAULT_EVENT_INTERVAL: u32 = 255;
 
 /// Scheduler ticks between polling the global task queue.
 ///
-/// The scheduler checks the global queue every 31 ticks to balance fairness
+/// The scheduler checks the global queue every 127 ticks to balance fairness
 /// between local and global tasks. Lower values improve fairness but increase
 /// contention. Higher values favor local tasks but may starve global tasks.
-pub const DEFAULT_GLOBAL_QUEUE_INTERVAL: u32 = 31;
+pub const DEFAULT_GLOBAL_QUEUE_INTERVAL: u32 = 127;
 
 /// Maximum number of additional blocking threads spawned by the runtime.
 ///
@@ -127,27 +127,26 @@ pub const DEFAULT_GLOBAL_QUEUE_INTERVAL: u32 = 31;
 /// blocking workloads.
 ///
 /// Note that this is in addition to the core worker threads.
-pub const DEFAULT_MAX_BLOCKING_THREADS: usize = 512;
+pub const DEFAULT_MAX_BLOCKING_THREADS: usize = 4;
 
 /// Maximum number of I/O events processed per scheduler tick.
 ///
 /// The scheduler processes up to this many I/O events per tick before
 /// returning to task execution. This bounds the cost of I/O processing
 /// and ensures tasks aren't starved by heavy I/O activity.
-pub const DEFAULT_MAX_IO_EVENTS_PER_TICK: usize = 1024;
+pub const DEFAULT_MAX_IO_EVENTS_PER_TICK: usize = 64;
 
 /// Duration that idle blocking threads are kept alive.
 ///
 /// Blocking threads that remain idle for longer than this duration are
 /// eligible for termination. This helps reclaim resources during periods
 /// of low blocking activity.
-pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_millis(10 * 1000);
+pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(60);
 
 /// Stack size allocated for each Tokio worker thread.
 ///
 /// This value applies to both async worker threads and blocking task threads.
-/// The default of 2 MiB balances stack overflow safety with memory efficiency.
-pub const DEFAULT_THREAD_STACK_SIZE: usize = 2 * 1024 * 1024;
+pub const DEFAULT_THREAD_STACK_SIZE: usize = 1024 * 1024;
 
 // -----------------------------------------------------------------------------
 // System - Shutdown
