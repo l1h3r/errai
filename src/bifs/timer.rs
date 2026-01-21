@@ -4,9 +4,7 @@
 
 use crossbeam_utils::CachePadded;
 use hashbrown::HashMap;
-use parking_lot::Mutex;
 use std::pin::Pin;
-use std::sync::LazyLock;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
@@ -17,7 +15,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
-use tokio::time;
+use tokio_util::future::FutureExt;
 use tokio_util::time::DelayQueue;
 use tokio_util::time::delay_queue::Expired;
 use tokio_util::time::delay_queue::Key as QueueKey;
@@ -27,7 +25,7 @@ use crate::core::InternalDest;
 use crate::core::InternalPid;
 use crate::core::Term;
 use crate::core::TimerRef;
-use crate::erts::System;
+use crate::node::LocalNode;
 use crate::proc::ProcTask;
 use crate::raise;
 
@@ -160,64 +158,51 @@ pub(crate) async fn proc_timer_stop_blocking(tref: TimerRef) -> Option<Duration>
 // Timer Service
 // -----------------------------------------------------------------------------
 
-/// Global timer service.
-static SERVICE: LazyLock<TimerService> = LazyLock::new(|| TimerService::new());
-
-#[repr(transparent)]
+#[repr(C)]
 pub(crate) struct TimerService {
-  pool: Vec<CachePadded<WorkerTask>>,
+  senders: Vec<CachePadded<UnboundedSender<Signal>>>,
+  handles: Vec<JoinHandle<()>>,
 }
 
 impl TimerService {
   #[inline]
-  fn new() -> Self {
-    let capacity: usize = System::available_cpus();
-    let mut pool: Vec<CachePadded<WorkerTask>> = Vec::with_capacity(capacity);
+  pub(crate) fn new(workers: usize) -> Self {
+    let mut senders: Vec<CachePadded<UnboundedSender<Signal>>> = Vec::with_capacity(workers);
+    let mut handles: Vec<JoinHandle<()>> = Vec::with_capacity(workers);
 
-    tracing::info!(workers = capacity, "initializing wheel workers");
+    tracing::info!(workers, "initializing wheel workers");
 
-    for id in 0..capacity {
+    for id in 0..workers {
       let (send, recv): _ = mpsc::unbounded_channel();
 
-      let join: JoinHandle<()> = tokio::spawn(WheelWorker::task(id, recv));
+      let task: JoinHandle<()> = tokio::spawn(WheelWorker::task(id, recv));
 
       tracing::debug!(id, "spawned wheel worker");
 
-      pool.push(CachePadded::new(WorkerTask {
-        send,
-        join: Mutex::new(Some(join)),
-      }));
+      senders.push(CachePadded::new(send));
+      handles.push(task);
     }
 
-    Self { pool }
+    Self { senders, handles }
   }
 
-  pub(crate) async fn quit(timeout: Duration) {
-    let capacity: usize = SERVICE.pool.len();
-    let mut data: Vec<(usize, JoinHandle<()>)> = Vec::with_capacity(capacity);
-
-    for (id, worker) in SERVICE.pool.iter().enumerate() {
-      if let Err(error) = worker.send.send(TimerSignal::Quit) {
+  pub(crate) async fn shutdown(self, timeout: Duration) {
+    for (id, send) in self.senders.iter().enumerate() {
+      if let Err(error) = send.send(Signal::Quit) {
         tracing::warn!(id, ?error, "dangling wheel worker");
-      }
-
-      if let Some(handle) = worker.join.lock().take() {
-        data.push((id, handle));
-      } else {
-        tracing::warn!(id, "dangling wheel worker");
       }
     }
 
-    for (id, handle) in data {
-      match time::timeout(timeout, handle).await {
+    for (id, handle) in self.handles.into_iter().enumerate() {
+      match handle.timeout(timeout).await {
         Ok(Ok(())) => {
-          // do nothing
+          // clean shutdown
         }
         Ok(Err(error)) => {
-          tracing::error!(id, ?error, "wheel worker error");
+          tracing::error!(id, ?error, "wheel worker join error");
         }
-        Err(_elapsed) => {
-          tracing::error!(id, "wheel worker timeout");
+        Err(error) => {
+          tracing::error!(id, ?error, "wheel worker timeout error");
         }
       }
     }
@@ -238,7 +223,7 @@ impl TimerService {
       ends: Instant::now() + time,
     };
 
-    Self::dispatch(tref, TimerSignal::Init(data))
+    Self::dispatch(tref, Signal::Init(data))
   }
 
   #[inline]
@@ -248,7 +233,7 @@ impl TimerService {
       mode: mode.into(),
     };
 
-    Self::dispatch(tref, TimerSignal::Read(data))
+    Self::dispatch(tref, Signal::Read(data))
   }
 
   #[inline]
@@ -258,13 +243,14 @@ impl TimerService {
       mode: mode.into(),
     };
 
-    Self::dispatch(tref, TimerSignal::Stop(data))
+    Self::dispatch(tref, Signal::Stop(data))
   }
 
-  fn dispatch(tref: TimerRef, signal: TimerSignal) -> usize {
-    let slot: usize = (tref.global_id() % SERVICE.pool.len() as u64) as usize;
+  fn dispatch(tref: TimerRef, signal: Signal) -> usize {
+    let this: &'static Self = LocalNode::timer();
+    let slot: usize = (tref.global_id() % this.senders.len() as u64) as usize;
 
-    if let Err(error) = SERVICE.pool[slot].send.send(signal) {
+    if let Err(error) = this.senders[slot].send(signal) {
       raise!(Error, SysInv, error);
     }
 
@@ -277,7 +263,7 @@ impl TimerService {
 // -----------------------------------------------------------------------------
 
 /// Timer operation sent to a wheel worker.
-enum TimerSignal {
+enum Signal {
   /// Initialize a new timer
   Init(InitTimer),
   /// Read timer information
@@ -383,16 +369,6 @@ impl<'a, T> Future for PollExpired<'a, T> {
 }
 
 // -----------------------------------------------------------------------------
-// Wheel Worker Task Handle
-// -----------------------------------------------------------------------------
-
-/// Handle to a wheel worker.
-struct WorkerTask {
-  send: UnboundedSender<TimerSignal>,
-  join: Mutex<Option<JoinHandle<()>>>,
-}
-
-// -----------------------------------------------------------------------------
 // Wheel Worker Task
 // -----------------------------------------------------------------------------
 
@@ -413,7 +389,7 @@ impl WheelWorker {
     }
   }
 
-  async fn task(id: usize, mut recv: UnboundedReceiver<TimerSignal>) {
+  async fn task(id: usize, mut recv: UnboundedReceiver<Signal>) {
     let mut this: Self = Self::new(id);
 
     tracing::trace!(id, "wheel worker started");
@@ -422,19 +398,19 @@ impl WheelWorker {
       tokio::select! {
         biased;
         Some(expired) = PollExpired(&mut this.queue), if !this.queue.is_empty() => {
-          this.drain(expired);
+          this.on_expired(expired);
         }
         Some(signal) = recv.recv() => match signal {
-          TimerSignal::Init(signal) => this.on_init(signal),
-          TimerSignal::Read(signal) => this.on_read(signal),
-          TimerSignal::Stop(signal) => this.on_stop(signal),
-          TimerSignal::Quit => break 'work this.on_quit(),
+          Signal::Init(signal) => this.on_init(signal),
+          Signal::Read(signal) => this.on_read(signal),
+          Signal::Stop(signal) => this.on_stop(signal),
+          Signal::Quit => break 'work this.on_quit(recv),
         }
       }
     }
   }
 
-  fn drain(&mut self, expired: Expired<TimerRef>) {
+  fn on_expired(&mut self, expired: Expired<TimerRef>) {
     let tref: TimerRef = expired.into_inner();
 
     if let Some(entry) = self.cache.remove(&tref) {
@@ -492,7 +468,7 @@ impl WheelWorker {
     send_stop_ack(signal, info);
   }
 
-  fn on_quit(&mut self) {
+  fn on_quit(&mut self, recv: UnboundedReceiver<Signal>) {
     tracing::info!(
       id = self.id,
       active = self.cache.len(),
@@ -504,7 +480,17 @@ impl WheelWorker {
       tracing::trace!(id = self.id, tref = %tref, "timer cancelled");
     }
 
+    Self::drain_channel(recv);
+
     tracing::info!(id = self.id, "wheel worker quit");
+  }
+
+  fn drain_channel(mut recv: UnboundedReceiver<Signal>) {
+    recv.close();
+
+    while let Ok(_) = recv.try_recv() {
+      // ignore all remaining signals
+    }
   }
 }
 

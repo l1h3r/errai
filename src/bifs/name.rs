@@ -13,11 +13,10 @@ use parking_lot::RwLockWriteGuard;
 use crate::bifs::proc_with;
 use crate::core::Atom;
 use crate::core::InternalPid;
+use crate::node::LocalNode;
 use crate::proc::ProcExternal;
 use crate::proc::ProcTask;
 use crate::raise;
-
-use super::REGISTERED_NAMES;
 
 /// Registers a name for a process.
 ///
@@ -46,7 +45,7 @@ pub(crate) fn proc_register(this: &ProcTask, pid: InternalPid, name: Atom) {
     raise!(Error, BadArg, "reserved name");
   }
 
-  let mut name_guard: RwLockWriteGuard<'_, HashMap<Atom, InternalPid>> = REGISTERED_NAMES.write();
+  let mut name_guard: RwLockWriteGuard<'_, HashMap<Atom, InternalPid>> = LocalNode::names().write();
 
   let Entry::Vacant(name_entry) = name_guard.entry(name) else {
     raise!(Error, BadArg, "registered name");
@@ -90,7 +89,7 @@ pub(crate) fn proc_register(this: &ProcTask, pid: InternalPid, name: Atom) {
 ///
 /// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2309>
 pub(crate) fn proc_unregister(this: &ProcTask, name: Atom) {
-  let mut name_guard: RwLockWriteGuard<'_, HashMap<Atom, InternalPid>> = REGISTERED_NAMES.write();
+  let mut name_guard: RwLockWriteGuard<'_, HashMap<Atom, InternalPid>> = LocalNode::names().write();
 
   let Entry::Occupied(name_entry) = name_guard.entry(name) else {
     raise!(Error, BadArg, "unregistered name");
@@ -124,7 +123,7 @@ pub(crate) fn proc_unregister(this: &ProcTask, name: Atom) {
 ///
 /// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L2327>
 pub(crate) fn proc_whereis(name: Atom) -> Option<InternalPid> {
-  REGISTERED_NAMES.read().get(&name).copied()
+  LocalNode::names().read().get(&name).copied()
 }
 
 /// Returns all currently registered names.
@@ -134,5 +133,5 @@ pub(crate) fn proc_whereis(name: Atom) -> Option<InternalPid> {
 ///
 /// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/register.c#L576>
 pub(crate) fn proc_registered() -> Vec<Atom> {
-  Vec::from_iter(REGISTERED_NAMES.read().keys().copied())
+  Vec::from_iter(LocalNode::names().read().keys().copied())
 }

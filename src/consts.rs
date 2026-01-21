@@ -165,7 +165,13 @@ pub const DEFAULT_THREAD_STACK_SIZE: usize = 1024 * 1024;
 ///
 /// The runtime waits up to this duration for processes to terminate cleanly
 /// during shutdown.
-pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+pub const SHUTDOWN_TIMEOUT_RUNTIME: Duration = Duration::from_secs(30);
+
+/// Maximum duration allowed for graceful timer service wheel worker shutdown.
+///
+/// Each timer service wheel worker waits up to this duration for tasks to
+/// terminate cleanly during shutdown.
+pub const SHUTDOWN_TIMEOUT_WHEEL_WORKER: Duration = Duration::from_millis(200);
 
 // -----------------------------------------------------------------------------
 // System - Memory Allocation
@@ -237,8 +243,11 @@ mod tests {
 
   #[test]
   fn test_shutdown_timeout_is_reasonable() {
-    assert!(SHUTDOWN_TIMEOUT.as_secs() >= 5);
-    assert!(SHUTDOWN_TIMEOUT.as_secs() <= 300);
+    assert!(SHUTDOWN_TIMEOUT_RUNTIME.as_secs() >= 5);
+    assert!(SHUTDOWN_TIMEOUT_RUNTIME.as_secs() <= 300);
+
+    assert!(SHUTDOWN_TIMEOUT_WHEEL_WORKER.as_millis() >= 25);
+    assert!(SHUTDOWN_TIMEOUT_WHEEL_WORKER.as_millis() <= 500);
   }
 
   #[test]

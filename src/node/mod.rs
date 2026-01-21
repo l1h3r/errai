@@ -6,6 +6,10 @@ use crate::core::ExternalRef;
 use crate::core::InternalPid;
 use crate::core::Term;
 
+mod local;
+
+pub(crate) use self::local::LocalNode;
+
 // -----------------------------------------------------------------------------
 // @error - NodeStartError
 // -----------------------------------------------------------------------------

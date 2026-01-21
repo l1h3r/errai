@@ -11,6 +11,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::oneshot::Sender;
+use tokio::sync::oneshot::error::RecvError;
 use tracing::Level;
 use tracing::field;
 use tracing::subscriber;
@@ -24,6 +25,7 @@ use crate::erts::DynMessage;
 use crate::erts::Process;
 use crate::erts::ProcessFlags;
 use crate::erts::System;
+use crate::node::LocalNode;
 
 type PanicHook = Box<dyn Fn(&PanicHookInfo<'_>) + Sync + Send + 'static>;
 
@@ -62,7 +64,7 @@ static WORKER_ID: AtomicU32 = AtomicU32::new(1);
 ///
 /// 1. Receives exit signal from application
 /// 2. Signals runtime to stop
-/// 3. Waits up to [`SHUTDOWN_TIMEOUT`] for cleanup
+/// 3. Waits up to [`SHUTDOWN_TIMEOUT_RUNTIME`] for cleanup
 /// 4. Exits process with appropriate code
 ///
 /// # Panics
@@ -70,7 +72,7 @@ static WORKER_ID: AtomicU32 = AtomicU32::new(1);
 /// Panics during initialization cause the process to exit with code `-1`.
 /// Panics during execution are logged but handled by the supervision tree.
 ///
-/// [`SHUTDOWN_TIMEOUT`]: consts::SHUTDOWN_TIMEOUT
+/// [`SHUTDOWN_TIMEOUT_RUNTIME`]: consts::SHUTDOWN_TIMEOUT_RUNTIME
 pub fn block_on<F>(future: F) -> !
 where
   F: Future<Output = ()> + Send + 'static,
@@ -120,9 +122,16 @@ where
   let task = async move {
     let (send, recv): (Sender<()>, Receiver<()>) = oneshot::channel();
 
+    // Force initialization of the local node.
+    let _ignore: &LocalNode = LocalNode::this();
+
     spawn_root_process(future, send);
 
-    recv.await
+    let result: Result<(), RecvError> = recv.await;
+
+    LocalNode::shutdown().await;
+
+    result
   };
 
   // ---------------------------------------------------------------------------
@@ -138,7 +147,7 @@ where
   // 5. Shutdown & Exit
   // ---------------------------------------------------------------------------
 
-  runtime.shutdown_timeout(consts::SHUTDOWN_TIMEOUT);
+  runtime.shutdown_timeout(consts::SHUTDOWN_TIMEOUT_RUNTIME);
 
   process::exit(consts::E_CODE_SUCCESS);
 }

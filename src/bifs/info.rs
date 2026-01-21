@@ -7,9 +7,8 @@
 
 use crate::core::InternalPid;
 use crate::erts::ProcessInfo;
+use crate::node::LocalNode;
 use crate::proc::ProcTask;
-
-use super::REGISTERED_PROCS;
 
 /// Returns a list of all currently existing process identifiers.
 ///
@@ -18,10 +17,10 @@ use super::REGISTERED_PROCS;
 ///
 /// BEAM Builtin: <https://github.com/erlang/otp/blob/master/erts/emulator/beam/bif.c#L4078>
 pub(crate) fn proc_list() -> Vec<InternalPid> {
-  let capacity: usize = REGISTERED_PROCS.len();
+  let capacity: usize = LocalNode::procs().len();
   let mut data: Vec<InternalPid> = Vec::with_capacity(capacity);
 
-  for pid in REGISTERED_PROCS.keys() {
+  for pid in LocalNode::procs().keys() {
     data.push(pid);
   }
 

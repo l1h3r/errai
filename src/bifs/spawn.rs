@@ -27,6 +27,7 @@ use crate::erts::Signal;
 use crate::erts::SignalRecv;
 use crate::erts::SpawnConfig;
 use crate::erts::SpawnHandle;
+use crate::node::LocalNode;
 use crate::proc;
 use crate::proc::ProcData;
 use crate::proc::ProcExternal;
@@ -38,9 +39,6 @@ use crate::proc::ProcTask;
 use crate::proc::TaskGuard;
 use crate::raise;
 use crate::utils::CatchUnwind;
-
-use super::REGISTERED_NAMES;
-use super::REGISTERED_PROCS;
 
 /// Sends an exit signal to the target process.
 ///
@@ -285,7 +283,7 @@ fn proc_create(parent: Option<&ProcTask>, options: SpawnConfig) -> (Arc<ProcData
     }
   };
 
-  let Ok(proc) = REGISTERED_PROCS.insert(initialize) else {
+  let Ok(proc) = LocalNode::procs().insert(initialize) else {
     raise!(Error, SysCap, "too many processes");
   };
 
@@ -328,7 +326,7 @@ pub(crate) fn proc_remove(this: &mut ProcTask) {
   tracing::trace!("(2) - Unregister Name");
 
   if let Some(name) = name {
-    if let None = REGISTERED_NAMES.write().remove(&name) {
+    if let None = LocalNode::names().write().remove(&name) {
       tracing::error!(%name, "dangling name");
     }
   }
@@ -359,7 +357,7 @@ pub(crate) fn proc_remove(this: &mut ProcTask) {
 
   tracing::trace!("(5) - State");
 
-  if let None = REGISTERED_PROCS.remove(this.readonly.mpid) {
+  if let None = LocalNode::procs().remove(this.readonly.mpid) {
     tracing::error!("dangling state");
   };
 

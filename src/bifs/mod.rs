@@ -15,15 +15,6 @@
 //! - Send signals between processes
 //! - Manage process lifecycle
 //!
-//! # Global State
-//!
-//! Two global tables manage process state:
-//!
-//! - [`REGISTERED_PROCS`]: Maps PIDs to process data
-//! - [`REGISTERED_NAMES`]: Maps registered names to PIDs
-//!
-//! These tables are initialized lazily and persist for the runtime's lifetime.
-//!
 //! # BEAM References
 //!
 //! Many functions reference corresponding BEAM (Erlang VM) implementations.
@@ -39,31 +30,12 @@
 //! - `erts/emulator/beam/register.c`
 //! - `erts/emulator/beam/erl_process_dict.c`
 
-use hashbrown::HashMap;
-use parking_lot::RwLock;
-use std::sync::LazyLock;
 use triomphe::Arc;
 
-use crate::consts;
-use crate::core::Atom;
 use crate::core::InternalPid;
-use crate::core::ProcTable;
+use crate::node::LocalNode;
 use crate::proc::ProcData;
 use crate::proc::ProcTask;
-
-/// Global process table mapping PIDs to process data.
-///
-/// This table is the authoritative source for all process state. It uses
-/// a lock-free implementation optimized for concurrent access.
-static REGISTERED_PROCS: LazyLock<ProcTable<ProcData>> =
-  LazyLock::new(|| ProcTable::with_capacity(consts::MAX_REGISTERED_PROCS));
-
-/// Global name registry mapping registered names to PIDs.
-///
-/// Names provide stable addresses for processes. The table uses an RwLock
-/// since name registration is infrequent compared to lookups.
-static REGISTERED_NAMES: LazyLock<RwLock<HashMap<Atom, InternalPid>>> =
-  LazyLock::new(|| RwLock::new(HashMap::with_capacity(consts::CAP_REGISTERED_NAMES)));
 
 mod dictionary;
 mod flags;
@@ -113,6 +85,7 @@ pub(crate) use self::spawn::proc_remove;
 pub(crate) use self::spawn::proc_spawn;
 pub(crate) use self::spawn::proc_spawn_root;
 
+pub(crate) use self::timer::TimerService;
 pub(crate) use self::timer::proc_timer_init;
 pub(crate) use self::timer::proc_timer_read;
 pub(crate) use self::timer::proc_timer_read_blocking;
@@ -133,7 +106,7 @@ pub use self::timer::StopTimerAck;
 /// Used for displaying PIDs in human-readable format.
 pub(crate) fn translate_pid(pid: InternalPid) -> Option<(u32, u32)> {
   if pid.into_bits() & InternalPid::TAG_MASK == InternalPid::TAG_DATA {
-    Some(REGISTERED_PROCS.translate_pid(pid))
+    Some(LocalNode::procs().translate_pid(pid))
   } else {
     None
   }
@@ -147,7 +120,7 @@ pub(crate) fn translate_pid(pid: InternalPid) -> Option<(u32, u32)> {
 ///
 /// Returns `None` if the process doesn't exist or has been removed.
 pub(crate) fn proc_find(pid: InternalPid) -> Option<Arc<ProcData>> {
-  REGISTERED_PROCS.get(pid)
+  LocalNode::procs().get(pid)
 }
 
 /// Helper for operations that may target the calling process or another process.

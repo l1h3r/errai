@@ -6,10 +6,10 @@
 //!
 //! # Architecture
 //!
-//! Process data is split into three sections with different locking requirements:
+//! Process data is split into three sections with different access requirements:
 //!
 //! - [`ProcReadOnly`]: Immutable data accessible without locks
-//! - [`ProcInternal`]: Mutable state protected by [`Mutex`]
+//! - [`ProcInternal`]: Process-local state protected by [`TaskGuard`]
 //! - [`ProcExternal`]: Rarely-modified state protected by [`RwLock`]
 //!
 //! This separation minimizes lock contention by isolating frequently-accessed
@@ -27,7 +27,6 @@
 //! processes are properly removed from the process table when their task
 //! completes.
 //!
-//! [`Mutex`]: ::parking_lot::Mutex
 //! [`RwLock`]: ::parking_lot::RwLock
 
 mod proc_data;
