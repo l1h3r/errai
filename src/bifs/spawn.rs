@@ -9,6 +9,7 @@ use std::mem::MaybeUninit;
 use std::panic::AssertUnwindSafe;
 use tokio::task;
 use tokio::task::futures::TaskLocalFuture;
+use tracing::Level;
 use tracing::Span;
 use tracing::span;
 use triomphe::Arc;
@@ -136,6 +137,8 @@ where
 
   let (proc, sig_recv): (Arc<ProcData>, ProcRecv) = proc_create(parent, options);
 
+  let pid: InternalPid = proc.readonly.mpid;
+
   // ---------------------------------------------------------------------------
   // 2. Create Process Task
   // ---------------------------------------------------------------------------
@@ -150,11 +153,13 @@ where
 
     tokio::pin!(safe_task);
 
+    let span: Span = span!(target: "errai", Level::TRACE, "process", this = %pid);
+
     // Run signal processing + user future until termination
     let exit: Exit = 'run: loop {
       // Process all pending signals before waiting
       while let Ok(signal) = queue.try_recv() {
-        if let Some(exit) = Process::with(|this| proc_handle_signal(this, signal)) {
+        if let Some(exit) = Process::with(|this| proc_handle_signal(&span, this, signal)) {
           break 'run exit;
         }
       }
@@ -163,7 +168,7 @@ where
         biased;
         // Prioritize signals over user code
         Some(signal) = queue.recv() => {
-          if let Some(exit) = Process::with(|this| proc_handle_signal(this, signal)) {
+          if let Some(exit) = Process::with(|this| proc_handle_signal(&span, this, signal)) {
             break 'run exit;
           }
         }
@@ -192,23 +197,23 @@ where
       raise!(Error, SysInv, "link without parent");
     };
 
-    bifs::proc_link(root, proc.readonly.mpid);
+    bifs::proc_link(root, pid);
   }
 
   // ---------------------------------------------------------------------------
   // 4. Initialize Monitor
   // ---------------------------------------------------------------------------
 
-  let mut handle: SpawnHandle = SpawnHandle::Process(proc.readonly.mpid);
+  let mut handle: SpawnHandle = SpawnHandle::Process(pid);
 
   if options.monitor {
     let Some(root) = parent else {
       raise!(Error, SysInv, "monitor without parent");
     };
 
-    let mtarget: ExternalDest = ExternalDest::InternalProc(proc.readonly.mpid);
+    let mtarget: ExternalDest = ExternalDest::InternalProc(pid);
     let monitor: MonitorRef = bifs::proc_monitor(root, mtarget);
-    let mhandle: SpawnHandle = SpawnHandle::Monitor(proc.readonly.mpid, monitor);
+    let mhandle: SpawnHandle = SpawnHandle::Monitor(pid, monitor);
 
     handle = mhandle;
   }
@@ -371,6 +376,6 @@ pub(crate) fn proc_remove(this: &mut ProcTask) {
 /// Processes a signal in the context of the receiving process.
 ///
 /// Returns `Some(Exit)` if the signal should terminate the process.
-fn proc_handle_signal(this: &ProcTask, signal: Signal) -> Option<Exit> {
-  signal.recv(&this.readonly, &mut this.internal())
+fn proc_handle_signal(span: &Span, this: &ProcTask, signal: Signal) -> Option<Exit> {
+  signal.recv(span, &this.readonly, &mut this.internal())
 }

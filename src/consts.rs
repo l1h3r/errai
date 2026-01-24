@@ -18,27 +18,6 @@ use std::time::Duration;
 use crate::core::ProcTable;
 
 // -----------------------------------------------------------------------------
-// Exit Codes
-// -----------------------------------------------------------------------------
-
-/// Exit code indicating successful runtime initialization and execution.
-///
-/// Returned when the runtime completes normally without errors.
-pub const E_CODE_SUCCESS: i32 = 0;
-
-/// Exit code indicating a failure during runtime initialization.
-///
-/// Returned when the runtime fails to start, such as due to configuration
-/// errors or resource allocation failures.
-pub const E_CODE_FAILURE_INIT: i32 = -1;
-
-/// Exit code indicating a failure during runtime execution.
-///
-/// Returned when the runtime encounters a fatal error during execution,
-/// such as an unhandled panic in a critical system process.
-pub const E_CODE_FAILURE_EXEC: i32 = -2;
-
-// -----------------------------------------------------------------------------
 // System - Erlang Things
 // -----------------------------------------------------------------------------
 
@@ -196,24 +175,6 @@ pub const CAP_REGISTERED_NAMES: usize = ProcTable::<()>::MIN_ENTRIES;
 #[cfg(test)]
 mod tests {
   use crate::consts::*;
-
-  #[test]
-  fn test_exit_codes_are_distinct() {
-    assert_ne!(E_CODE_SUCCESS, E_CODE_FAILURE_INIT);
-    assert_ne!(E_CODE_SUCCESS, E_CODE_FAILURE_EXEC);
-    assert_ne!(E_CODE_FAILURE_INIT, E_CODE_FAILURE_EXEC);
-  }
-
-  #[test]
-  fn test_exit_code_success_is_zero() {
-    assert_eq!(E_CODE_SUCCESS, 0);
-  }
-
-  #[test]
-  fn test_exit_codes_are_negative() {
-    assert!(E_CODE_FAILURE_INIT < 0);
-    assert!(E_CODE_FAILURE_EXEC < 0);
-  }
 
   #[test]
   fn test_max_atom_count_is_power_of_two() {

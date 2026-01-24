@@ -1,173 +1,186 @@
-//! Errai runtime initialization and lifecycle management
+mod kernel;
+mod server;
+mod shutdown;
 
-use std::io::Error;
-use std::panic;
-use std::panic::PanicHookInfo;
-use std::process;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering;
+pub(crate) use self::shutdown::ExitCode;
+pub(crate) use self::shutdown::Terminate;
+pub(crate) use self::shutdown::TerminateRecv;
+pub(crate) use self::shutdown::TerminateSend;
+
+use std::fmt::Display;
+use std::time::Duration;
 use tokio::runtime::Builder;
-use tokio::runtime::Runtime;
-use tokio::sync::oneshot;
-use tokio::sync::oneshot::Receiver;
-use tokio::sync::oneshot::Sender;
-use tokio::sync::oneshot::error::RecvError;
+use tokio::runtime::Runtime as TokioRuntime;
 use tracing::Level;
-use tracing::field;
-use tracing::subscriber;
-use tracing_subscriber::FmtSubscriber;
+use tracing::Span;
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::span;
 
 use crate::bifs;
-use crate::consts;
 use crate::core::InternalPid;
-use crate::core::Term;
-use crate::erts::DynMessage;
-use crate::erts::Process;
-use crate::erts::ProcessFlags;
-use crate::erts::System;
+use crate::error::Exception;
+use crate::error::ExceptionClass;
+use crate::error::ExceptionGroup;
+use crate::erts::RuntimeConfig;
+use crate::loom::sync::atomic::AtomicBool;
+use crate::loom::sync::atomic::AtomicU32;
+use crate::loom::sync::atomic::Ordering;
 use crate::node::LocalNode;
+use crate::raise;
+use crate::utils::measure_fn;
 
-type PanicHook = Box<dyn Fn(&PanicHookInfo<'_>) + Sync + Send + 'static>;
-
-/// Counter for generating unique worker thread names.
-static WORKER_ID: AtomicU32 = AtomicU32::new(1);
+static INIT: AtomicBool = AtomicBool::new(false);
 
 /// Runs the given future to completion on the Errai runtime system.
 ///
-/// This function initializes the runtime, executes the provided future as
-/// a supervised process, and performs graceful shutdown. It is the sole
-/// entrypoint to the Errai system.
-///
-/// # Process Exit
-///
-/// This function **never returns**. It calls [`process::exit()`] with one
-/// of the following codes:
-///
-/// - `0`: Normal termination (application completed successfully)
-/// - `-1`: Initialization failed (tracing, runtime creation)
-/// - `-2`: Execution failed (runtime or shutdown error)
-///
-/// # Initialization
-///
-/// The runtime performs these initialization steps:
-///
-/// 1. Configures global tracing subscriber
-/// 2. Installs panic hook for exception logging
-/// 3. Builds Tokio multi-threaded runtime
-/// 4. Spawns root supervisor process
-/// 5. Spawns application process (your future)
-///
-/// # Shutdown
-///
-/// When the application process terminates, the root supervisor initiates
-/// shutdown:
-///
-/// 1. Receives exit signal from application
-/// 2. Signals runtime to stop
-/// 3. Waits up to [`SHUTDOWN_TIMEOUT_RUNTIME`] for cleanup
-/// 4. Exits process with appropriate code
-///
-/// # Panics
-///
-/// Panics during initialization cause the process to exit with code `-1`.
-/// Panics during execution are logged but handled by the supervision tree.
-///
-/// [`SHUTDOWN_TIMEOUT_RUNTIME`]: consts::SHUTDOWN_TIMEOUT_RUNTIME
-pub fn block_on<F>(future: F) -> !
+/// This is the same as calling `run_opts(future, Default::default())`.
+#[inline]
+pub fn run<F>(future: F) -> !
 where
   F: Future<Output = ()> + Send + 'static,
 {
-  // ---------------------------------------------------------------------------
-  // 1. Configure Tracing
-  // ---------------------------------------------------------------------------
+  run_opts(future, Default::default())
+}
 
-  if let Err(error) = subscriber::set_global_default(build_tracing()) {
-    eprintln!("Failed to initialize runtime: {error}");
-    process::exit(consts::E_CODE_FAILURE_INIT);
+/// Runs the given future to completion on the Errai runtime system.
+pub fn run_opts<F>(future: F, config: RuntimeConfig) -> !
+where
+  F: Future<Output = ()> + Send + 'static,
+{
+  if INIT.swap(true, Ordering::SeqCst) {
+    raise!(Error, SysInv, "Errai is already running!");
   }
 
-  // ---------------------------------------------------------------------------
-  // 2. Configure Panic Hook
-  // ---------------------------------------------------------------------------
+  if let Err(error) = init_tracing_subsriber(&config) {
+    eprintln!("failed to set tracing subscriber:");
+    eprintln!("    {}", error.error());
+  }
 
-  let hook: PanicHook = panic::take_hook();
+  // SAFETY: We ensured above that `INIT` was not already set.
+  unsafe { run_unchecked(future, config) }
+}
 
-  // TODO: Avoid logging twice. Maybe don't add this..
-  panic::set_hook(Box::new(move |info| {
-    tracing::info!(
-      location = info.location().map(field::display),
-      payload = field::display(Term::new_error_ref(info.payload())),
-      "Uncaught exception"
-    );
+unsafe fn run_unchecked<F>(future: F, config: RuntimeConfig) -> !
+where
+  F: Future<Output = ()> + Send + 'static,
+{
+  let span: Span = span!(target: "errai", Level::DEBUG, "init::run");
 
-    hook(info);
-  }));
-
-  // ---------------------------------------------------------------------------
-  // 3. Configure Tokio Runtime
-  // ---------------------------------------------------------------------------
-
-  let runtime: Runtime = match build_runtime() {
+  let runtime: TokioRuntime = match build_tokio_runtime(&config) {
     Ok(runtime) => runtime,
     Err(error) => {
-      tracing::error!(%error, "Failed to initialize runtime");
-      process::exit(consts::E_CODE_FAILURE_INIT);
+      error!(
+        target: "errai",
+        parent: &span,
+        error = error.error(),
+        "failed to build runtime",
+      );
+
+      ExitCode::FAILURE.exit_process();
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // 3. Define Root Task
-  // ---------------------------------------------------------------------------
+  let terminate: Terminate = runtime.block_on(async {
+    debug!(target: "errai", parent: &span, "initializing");
 
-  let task = async move {
-    let (send, recv): (Sender<()>, Receiver<()>) = oneshot::channel();
+    let (send, mut recv): (TerminateSend, TerminateRecv) = shutdown::channel();
 
-    // Force initialization of the local node.
     let _ignore: &LocalNode = LocalNode::this();
+    let _ignore: InternalPid = bifs::proc_spawn_root(kernel::task(future, send));
 
-    spawn_root_process(future, send);
+    debug!(target: "errai", parent: &span, "polling");
 
-    let result: Result<(), RecvError> = recv.await;
+    let terminate: Option<Terminate> = recv.recv().await;
 
-    LocalNode::shutdown().await;
+    debug!(target: "errai", parent: &span, "exiting");
 
-    result
-  };
+    if let Some(result) = terminate {
+      result
+    } else {
+      raise!(Error, SysInv, "shutdown channel closed");
+    }
+  });
 
-  // ---------------------------------------------------------------------------
-  // 4. Run
-  // ---------------------------------------------------------------------------
+  match terminate {
+    Terminate::Stop(ecode) => {
+      info!(
+        target: "errai",
+        parent: &span,
+        status = ecode.to_i32(),
+        timeout = ?config.rt_shutdown_timeout,
+        "system stopping",
+      );
 
-  if let Err(error) = runtime.block_on(task) {
-    tracing::error!(%error, "Failed to execute runtime");
-    process::exit(consts::E_CODE_FAILURE_EXEC);
+      let elapsed: Duration = measure_fn(|| {
+        runtime.shutdown_timeout(config.rt_shutdown_timeout);
+      });
+
+      info!(
+        target: "errai",
+        parent: &span,
+        elapsed = ?elapsed,
+        "system stopped",
+      );
+
+      ecode.exit_process();
+    }
+    Terminate::Halt(ecode) => {
+      info!(
+        target: "errai",
+        parent: &span,
+        status = ecode.to_i32(),
+        "system halted",
+      );
+
+      ecode.exit_process();
+    }
+    Terminate::Dump(slogan) => {
+      info!(
+        target: "errai",
+        parent: &span,
+        status = ExitCode::FAILURE.to_i32(),
+        "system halted",
+      );
+
+      // TODO: Crash Dump
+
+      ExitCode::FAILURE.exit_process();
+    }
   }
-
-  // ---------------------------------------------------------------------------
-  // 5. Shutdown & Exit
-  // ---------------------------------------------------------------------------
-
-  runtime.shutdown_timeout(consts::SHUTDOWN_TIMEOUT_RUNTIME);
-
-  process::exit(consts::E_CODE_SUCCESS);
 }
 
 /// Builds the global tracing subscriber configuration.
-fn build_tracing() -> FmtSubscriber {
+#[cfg(feature = "tracing")]
+fn init_tracing_subsriber(config: &RuntimeConfig) -> Result<(), Exception> {
+  use tracing_subscriber::FmtSubscriber;
+  use tracing_subscriber::fmt::format;
+  use tracing_subscriber::util::SubscriberInitExt;
+
   FmtSubscriber::builder()
+    .event_format(format().compact())
     .log_internal_errors(true)
     .with_ansi(true)
+    .with_file(config.tracing_source_file)
     .with_level(true)
-    .with_line_number(true)
-    .with_max_level(Level::DEBUG)
-    .with_target(true)
-    .with_thread_ids(true)
-    .with_thread_names(true)
+    .with_line_number(config.tracing_source_line)
+    .with_max_level(config.tracing_filter())
+    .with_target(config.tracing_source_name)
+    .with_thread_ids(config.tracing_thread_info)
+    .with_thread_names(config.tracing_thread_info)
     .finish()
+    .try_init()
+    .map_err(error)
 }
 
-/// Builds the Tokio multi-threaded runtime with Errai configuration.
-fn build_runtime() -> Result<Runtime, Error> {
+#[cfg(not(feature = "tracing"))]
+fn init_tracing_subsriber(_config: &RuntimeConfig) -> Result<(), Exception> {
+  Ok(())
+}
+
+/// Builds the Tokio multi-threaded runtime with the given configuration.
+fn build_tokio_runtime(config: &RuntimeConfig) -> Result<TokioRuntime, Exception> {
   // TODO: Maybe try and make use of the following hooks:
   //   - on_after_task_poll
   //   - on_before_task_poll
@@ -180,85 +193,36 @@ fn build_runtime() -> Result<Runtime, Error> {
   Builder::new_multi_thread()
     .enable_io()
     .enable_time()
-    .event_interval(consts::DEFAULT_EVENT_INTERVAL)
-    .global_queue_interval(consts::DEFAULT_GLOBAL_QUEUE_INTERVAL)
-    .max_blocking_threads(consts::DEFAULT_MAX_BLOCKING_THREADS)
-    .max_io_events_per_tick(consts::DEFAULT_MAX_IO_EVENTS_PER_TICK)
-    .thread_keep_alive(consts::DEFAULT_THREAD_KEEP_ALIVE)
+    .event_interval(config.rt_event_interval)
+    .global_queue_interval(config.rt_global_queue_interval)
+    .max_blocking_threads(config.rt_max_blocking_threads)
+    .max_io_events_per_tick(config.rt_max_io_events_per_tick)
+    .thread_keep_alive(config.rt_thread_keep_alive)
     .thread_name_fn(next_worker_name)
-    .thread_stack_size(consts::DEFAULT_THREAD_STACK_SIZE)
-    .worker_threads(System::available_cpus())
+    .thread_stack_size(config.rt_thread_stack_size)
+    .worker_threads(config.rt_worker_threads)
     .build()
-}
-
-/// Atomically increments and returns the next worker thread ID.
-fn next_worker_id() -> u32 {
-  WORKER_ID.fetch_add(1, Ordering::Relaxed)
+    .map_err(error)
 }
 
 /// Generates a unique name for the next worker thread.
-///
-/// Thread names follow the pattern: `errai-worker-N` where N is a
-/// monotonically increasing counter.
+#[inline]
 fn next_worker_name() -> String {
-  format!("errai-worker-{}", next_worker_id())
+  format!("erts-worker-{:0>2}", next_worker_id())
 }
 
-/// Spawns the root supervisor process.
-///
-/// The root process supervises the application process and initiates
-/// shutdown when it terminates.
-///
-/// # Panics
-///
-/// Exits the process if the shutdown channel is closed unexpectedly,
-/// indicating a critical runtime failure.
-fn spawn_root_process<F>(future: F, shutdown: Sender<()>) -> InternalPid
+/// Atomically increments and returns the next worker thread ID.
+#[inline]
+fn next_worker_id() -> u32 {
+  static ID: AtomicU32 = AtomicU32::new(1);
+  ID.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Returns a generic `SysInv` exception with the given error message.
+#[cold]
+fn error<E>(error: E) -> Exception
 where
-  F: Future<Output = ()> + Send + 'static,
+  E: Display,
 {
-  bifs::proc_spawn_root(async move {
-    let this: InternalPid = Process::this();
-
-    tracing::trace!(pid = %this, "Enter Root Process");
-
-    // Trap exit signals to detect application termination
-    Process::set_flag(ProcessFlags::TRAP_EXIT, true);
-
-    // Register for identification and debugging
-    Process::register(this, "$__ERTS_ROOT");
-
-    tracing::trace!(pid = %this, "Spawn Application Process");
-
-    // Spawn the application process with a link for supervision
-    let application: InternalPid = Process::spawn_link(future);
-
-    tracing::trace!(pid = %this, "Start Runloop");
-
-    // Wait for application exit signal
-    'run: loop {
-      match Process::receive_any().await {
-        DynMessage::Term(_term) => {
-          // Discard regular messages to prevent queue buildup
-        }
-        DynMessage::Exit(exit) if exit.from() == application => {
-          tracing::info!(?exit, "Runtime shutdown initialized");
-          break 'run;
-        }
-        DynMessage::Exit(_exit) => {
-          // Ignore exits from other processes
-        }
-        DynMessage::Down(_down) => {
-          // Ignore monitor down messages
-        }
-      }
-    }
-
-    tracing::trace!(pid = %this, "Exit Runloop");
-
-    if let Err(()) = shutdown.send(()) {
-      tracing::error!("Failed to shut down runtime: channel closed");
-      process::exit(consts::E_CODE_FAILURE_EXEC);
-    }
-  })
+  Exception::new(ExceptionClass::Error, ExceptionGroup::SysInv, error)
 }

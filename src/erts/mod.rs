@@ -8,7 +8,7 @@
 //!
 //! - [`Process`]: Main process API for spawning, messaging, and coordination
 //! - [`ProcessFlags`]: Process behavior flags (trap_exit, async_dist)
-//! - [`Runtime`]: Runtime control and system time
+//! - [`Runtime`]: Runtime control and system information
 //! - [`Message`]: Message envelope for received messages
 //! - [`ExitMessage`]: Trapped exit signal
 //! - [`DownMessage`]: Monitor notification
@@ -33,7 +33,6 @@ mod process;
 mod runtime;
 mod signal;
 mod spawn;
-mod system;
 
 pub(crate) use self::signal::ControlSignal;
 pub(crate) use self::signal::MessageSignal;
@@ -58,6 +57,6 @@ pub use self::process::Process;
 pub use self::process::ProcessFlags;
 pub use self::process::ProcessInfo;
 pub use self::runtime::Runtime;
+pub use self::runtime::RuntimeConfig;
 pub use self::spawn::SpawnConfig;
 pub use self::spawn::SpawnHandle;
-pub use self::system::System;
