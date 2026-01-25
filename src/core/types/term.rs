@@ -55,7 +55,7 @@ where
   fn dyn_eq(&self, other: &dyn Item) -> bool {
     (other as &dyn Any)
       .downcast_ref::<T>()
-      .map_or(false, |other| PartialEq::eq(self, other))
+      .is_some_and(|other| self == other)
   }
 }
 
