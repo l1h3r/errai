@@ -13,5 +13,6 @@ pub use self::table::MAX_ATOM_CHARS;
 pub use self::table::MAX_ATOM_COUNT;
 
 pub use self::types::Atom;
+pub use self::types::Exit;
 pub use self::types::Item;
 pub use self::types::Term;
