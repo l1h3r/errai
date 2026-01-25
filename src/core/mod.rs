@@ -12,7 +12,11 @@ pub use self::table::MAX_ATOM_BYTES;
 pub use self::table::MAX_ATOM_CHARS;
 pub use self::table::MAX_ATOM_COUNT;
 
+pub use self::types::AliasRef;
 pub use self::types::Atom;
 pub use self::types::Exit;
 pub use self::types::Item;
+pub use self::types::LocalRef;
+pub use self::types::MonitorRef;
 pub use self::types::Term;
+pub use self::types::TimerRef;
