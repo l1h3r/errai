@@ -350,7 +350,7 @@ mod tests {
   use crate::core::table::AtomTable;
 
   #[test]
-  fn stress_concurrent_insert_100_threads() {
+  fn test_concurrent_insert_100_threads() {
     const THREADS: usize = 100;
 
     let table: Arc<AtomTable> = Arc::new(AtomTable::new());
