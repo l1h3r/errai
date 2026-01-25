@@ -484,27 +484,23 @@ mod tests {
 
   #[test]
   fn test_new() {
-    let atom: Atom = Atom::new("test");
-    assert_eq!(atom.as_str(), "test");
+    assert_eq!(Atom::new("test").as_str(), "test");
   }
 
   #[test]
   fn test_new_empty_string() {
-    let atom: Atom = Atom::new("");
-    assert_eq!(atom.as_str(), "");
-    assert_eq!(atom, Atom::EMPTY);
+    assert_eq!(Atom::new("").as_str(), "");
+    assert_eq!(Atom::new(""), Atom::EMPTY);
   }
 
   #[test]
   fn test_new_unicode() {
-    let atom: Atom = Atom::new("こんにちは");
-    assert_eq!(atom.as_str(), "こんにちは");
+    assert_eq!(Atom::new("こんにちは").as_str(), "こんにちは");
   }
 
   #[test]
   fn test_new_emoji() {
-    let atom: Atom = Atom::new("🦀");
-    assert_eq!(atom.as_str(), "🦀");
+    assert_eq!(Atom::new("🦀").as_str(), "🦀");
   }
 
   #[test]
@@ -557,8 +553,7 @@ mod tests {
 
   #[test]
   fn test_default() {
-    let atom: Atom = Default::default();
-    assert_eq!(atom, Atom::EMPTY);
+    assert_eq!(<Atom as Default>::default(), Atom::EMPTY);
   }
 
   #[test]
