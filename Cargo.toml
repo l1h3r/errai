@@ -25,5 +25,6 @@ rustdoc-args = [
 ]
 
 [dependencies]
+dyn-clone = { version = "1.0", default-features = false }
 hashbrown = { version = "0.16", default-features = false, features = ["default-hasher", "inline-more", "raw-entry"] }
 parking_lot = { version = "0.12", default-features = false }
