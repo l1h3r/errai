@@ -1,3 +1,0 @@
-[env]
-LOOM_MAX_PREEMPTIONS = "3"  # Control exploration depth
-LOOM_MAX_BRANCHES = "10000" # Max branch points
