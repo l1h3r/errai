@@ -109,18 +109,6 @@ impl Atom {
   /// Atom representing the value `undefined`.
   pub const UNDEFINED: Self = Self::from_slot(6);
 
-  /// Constructs an atom from a raw atom table slot.
-  #[inline]
-  pub(crate) const fn from_slot(slot: u32) -> Self {
-    Self { slot }
-  }
-
-  /// Returns the atom table slot backing this atom.
-  #[inline]
-  pub(crate) const fn into_slot(self) -> u32 {
-    self.slot
-  }
-
   /// Interns a string and returns its corresponding atom.
   ///
   /// If the string has been interned before, returns the existing atom.
@@ -171,6 +159,18 @@ impl Atom {
       Ok(data) => data,
       Err(error) => fatal!(error),
     }
+  }
+
+  /// Constructs an atom from a raw atom table slot.
+  #[inline]
+  pub(crate) const fn from_slot(slot: u32) -> Self {
+    Self { slot }
+  }
+
+  /// Returns the atom table slot backing this atom.
+  #[inline]
+  pub(crate) const fn into_slot(self) -> u32 {
+    self.slot
   }
 }
 
