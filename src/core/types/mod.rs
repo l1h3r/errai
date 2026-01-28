@@ -1,3 +1,5 @@
+//! Runtime value types and identifiers.
+
 mod atom;
 mod exit;
 mod pids;

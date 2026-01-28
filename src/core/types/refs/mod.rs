@@ -1,3 +1,9 @@
+//! Reference types for runtime objects.
+//!
+//! References uniquely identify monitors, timers, and aliases within the
+//! runtime. They are generated atomically and are guaranteed unique within
+//! a node's lifetime.
+
 mod alias;
 mod local;
 

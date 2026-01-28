@@ -220,7 +220,7 @@ impl Debug for AtomTable {
       return f.write_str("AtomTable { *locked* }");
     };
 
-    // display the atom table as a labelled map, sorted by slot
+    // display the atom table as a labeled map, sorted by slot
     let tree: BTreeMap<u32, &str> = guard
       .map
       .iter()

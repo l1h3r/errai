@@ -1,3 +1,5 @@
+//! Core runtime types and tables.
+
 mod error;
 mod table;
 mod types;
