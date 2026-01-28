@@ -25,6 +25,8 @@ rustdoc-args = [
 ]
 
 [dependencies]
+crossbeam-epoch = { version = "0.9", default-features = false, features = ["std"] }
+crossbeam-utils = { version = "0.8", default-features = false, features = ["std"] }
 dyn-clone = { version = "1.0", default-features = false }
 hashbrown = { version = "0.16", default-features = false, features = ["default-hasher", "inline-more", "raw-entry"] }
 parking_lot = { version = "0.12", default-features = false }
