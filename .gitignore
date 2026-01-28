@@ -1,2 +1,4 @@
 /target
 /Cargo.lock
+/errai-benches/target
+/errai-benches/Cargo.lock
