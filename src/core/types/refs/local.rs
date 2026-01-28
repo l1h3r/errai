@@ -69,7 +69,7 @@ impl LocalRef {
     Self::from_bits(Self::pack_bits(thread, number))
   }
 
-  /// Creates an internal reference from its raw bits.
+  /// Creates a local reference from its raw bits.
   #[inline]
   pub(crate) const fn from_bits(bits: [u32; 3]) -> Self {
     Self { bits }

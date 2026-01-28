@@ -51,6 +51,9 @@ impl LocalPid {
   /// Bitmask for extracting the process table index field.
   pub(crate) const NUMBER_MASK: usize = (1_usize << Self::NUMBER_BITS) - 1;
 
+  /// The root process always gets the PID `0`.
+  pub(crate) const ROOT_PROC: Self = Self::from_bits(0);
+
   #[inline]
   pub(crate) const fn from_bits(bits: usize) -> Self {
     Self { bits }
