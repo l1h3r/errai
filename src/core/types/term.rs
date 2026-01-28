@@ -1,76 +1,73 @@
-//! Type-erased runtime value container used for inter-process communication.
-//!
-//! This module provides [`Term`], a dynamically typed value container that
-//! can safely traverse process boundaries. Terms support cloning, debugging,
-//! and type-safe downcasting.
-//!
-//! # Use Cases
-//!
-//! [`Term`] is designed for scenarios where the concrete type isn't known
-//! at compile time:
-//!
-//! - Generic message passing between processes
-//! - Dynamic process dictionaries
-//! - Polymorphic exit reasons and error values
-//! - Inter-process data structures with heterogeneous elements
-//!
-//! # Type Safety
-//!
-//! [`Term`] uses Rust's [`Any`] trait for runtime type checking. Values
-//! can be safely extracted using [`downcast_ref()`] and [`downcast_mut()`],
-//! which return [`None`] if the type doesn't match.
-//!
-//! # Examples
-//!
-//! ```
-//! use errai::core::Term;
-//!
-//! // Create terms from various types
-//! let num = Term::new(42_i32);
-//! let text = Term::new(String::from("hello"));
-//!
-//! // Type-safe downcasting
-//! assert_eq!(num.downcast_ref::<i32>(), Some(&42));
-//! assert_eq!(num.downcast_ref::<String>(), None);
-//!
-//! // Terms are cloneable
-//! let cloned = num.clone();
-//! assert_eq!(cloned.downcast_ref::<i32>(), Some(&42));
-//! ```
-//!
-//! [`downcast_ref()`]: Term::downcast_ref
-//! [`downcast_mut()`]: Term::downcast_mut
-
-use dyn_clone::clone_box;
+use dyn_clone::DynClone;
+use dyn_clone::clone_trait_object;
 use std::any::Any;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
-use crate::core::Item;
+// -----------------------------------------------------------------------------
+// Item
+// -----------------------------------------------------------------------------
+
+/// Trait implemented by all values stored inside a [`Term`].
+///
+/// This trait enables safe dynamic typing, cloning, and thread-safe sharing
+/// of values across process boundaries.
+///
+/// # Automatic Implementation
+///
+/// [`Item`] is automatically implemented for all types that satisfy:
+///
+/// - [`Any`]: Required for downcasting
+/// - [`Debug`]: Required for diagnostic output
+/// - [`DynClone`]: Required for cloning trait objects
+/// - [`Send`] + [`Sync`]: Required for inter-process communication
+/// - `'static`: Required for type erasure
+///
+/// Most types can be used in [`Term`] without explicit [`Item`] implementation.
+///
+/// # Examples
+///
+/// ```
+/// use errai::core::Term;
+///
+/// // These types automatically implement Item:
+/// let t1 = Term::new(42_i32);
+/// let t2 = Term::new(String::from("hello"));
+/// let t3 = Term::new(vec![1, 2, 3]);
+/// ```
+pub trait Item: Any + Debug + DynClone + Send + Sync + 'static {
+  /// Tests for `self` and `other` values to be equal.
+  ///
+  /// This is stricter than [`PartialEq`] because the types must be identical.
+  fn dyn_eq(&self, other: &dyn Item) -> bool;
+}
+
+clone_trait_object!(Item);
+
+impl<T> Item for T
+where
+  T: Any + Debug + DynClone + Send + Sync + 'static,
+  T: PartialEq,
+{
+  #[inline]
+  fn dyn_eq(&self, other: &dyn Item) -> bool {
+    (other as &dyn Any)
+      .downcast_ref::<T>()
+      .is_some_and(|other| self == other)
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Term
+// -----------------------------------------------------------------------------
 
 /// Dynamically typed value that can be sent between processes.
 ///
 /// [`Term`] wraps a boxed [`Item`] and provides type-safe downcasting APIs
 /// for inspecting or extracting the contained value. All values stored in
 /// a [`Term`] must implement [`Send`], [`Sync`], [`Debug`], and [`Clone`].
-///
-/// # Cloning Behavior
-///
-/// Cloning a [`Term`] performs a deep clone of the contained value using
-/// the [`DynClone`] trait. This ensures each process has its own copy of
-/// the data after message passing.
-///
-/// # Type Erasure
-///
-/// The concrete type is erased at the [`Term`] boundary but can be recovered
-/// at runtime using the downcasting methods:
-///
-/// - [`is()`]: Check if the value is of type `T`
-/// - [`downcast_ref()`]: Borrow the value as `&T`
-/// - [`downcast_mut()`]: Borrow the value as `&mut T`
-/// - [`downcast_unchecked()`]: Extract the value as `Box<T>` (unsafe)
 ///
 /// # Examples
 ///
@@ -89,12 +86,7 @@ use crate::core::Item;
 ///
 /// assert_eq!(term.downcast_ref::<Vec<i32>>(), Some(&vec![1, 2, 3, 4]));
 /// ```
-///
-/// [`DynClone`]: dyn_clone::DynClone
-/// [`is()`]: Self::is
-/// [`downcast_ref()`]: Self::downcast_ref
-/// [`downcast_mut()`]: Self::downcast_mut
-/// [`downcast_unchecked()`]: Self::downcast_unchecked
+#[derive(Clone)]
 #[repr(transparent)]
 pub struct Term {
   data: Box<dyn Item>,
@@ -102,9 +94,6 @@ pub struct Term {
 
 impl Term {
   /// Creates a new term wrapping the given value.
-  ///
-  /// The value must implement [`Item`], which is automatically satisfied
-  /// by most types that are [`Debug`] + [`Clone`] + [`Send`] + [`Sync`].
   ///
   /// # Examples
   ///
@@ -125,10 +114,7 @@ impl Term {
     }
   }
 
-  /// Returns `true` if the contained value is of type `T`.
-  ///
-  /// This is equivalent to checking `downcast_ref::<T>().is_some()` but
-  /// more efficient as it only performs the type check.
+  /// Returns `true` if the inner type is the same as `T`.
   ///
   /// # Examples
   ///
@@ -145,22 +131,21 @@ impl Term {
   where
     T: 'static,
   {
-    self.data.as_any().is::<T>()
+    (&*self.data as &dyn Any).is::<T>()
   }
 
-  /// Returns a shared reference to the contained value of type `T`.
-  ///
-  /// Returns [`None`] if the value has a different concrete type.
+  /// Returns some reference to the inner value if it is of type `T`,
+  /// or `None` if it isn’t.
   ///
   /// # Examples
   ///
   /// ```
   /// use errai::core::Term;
   ///
-  /// let term = Term::new(String::from("hello"));
+  /// let term = Term::new("hello");
   ///
   /// // Successful downcast
-  /// assert_eq!(term.downcast_ref::<String>(), Some(&String::from("hello")));
+  /// assert_eq!(term.downcast_ref::<&str>(), Some(&"hello"));
   ///
   /// // Failed downcast
   /// assert_eq!(term.downcast_ref::<i32>(), None);
@@ -170,12 +155,11 @@ impl Term {
   where
     T: 'static,
   {
-    self.data.as_any().downcast_ref()
+    (&*self.data as &dyn Any).downcast_ref()
   }
 
-  /// Returns a mutable reference to the contained value of type `T`.
-  ///
-  /// Returns [`None`] if the value has a different concrete type.
+  /// Returns some mutable reference to the inner value if it is of type `T`,
+  /// or `None` if it isn’t.
   ///
   /// # Examples
   ///
@@ -195,33 +179,27 @@ impl Term {
   where
     T: 'static,
   {
-    self.data.as_mut_any().downcast_mut()
+    (&mut *self.data as &mut dyn Any).downcast_mut()
   }
 
-  /// Converts this term into a boxed value of type `T` without checks.
+  /// Downcasts the term to a concrete type.
   ///
   /// # Safety
   ///
-  /// The contained value **must** be of type `T`. Supplying an incorrect
-  /// type results in undefined behavior.
-  ///
-  /// Use [`downcast_ref()`] or [`is()`] to verify the type first, or use
-  /// this method only when the type is guaranteed by construction.
+  /// The contained value **must** be of type `T`.
+  /// Calling this method with the incorrect type is *undefined behavior*.
   ///
   /// # Examples
   ///
   /// ```
   /// use errai::core::Term;
   ///
-  /// let term = Term::new(String::from("hello"));
+  /// let term = Term::new("hello");
   ///
-  /// // Safe: we know the type
-  /// let boxed = unsafe { term.downcast_unchecked::<String>() };
+  /// // SAFETY: we know the type
+  /// let boxed = unsafe { term.downcast_unchecked::<&str>() };
   /// assert_eq!(*boxed, "hello");
   /// ```
-  ///
-  /// [`downcast_ref()`]: Self::downcast_ref
-  /// [`is()`]: Self::is
   #[inline]
   pub unsafe fn downcast_unchecked<T>(self) -> Box<T>
   where
@@ -238,7 +216,7 @@ impl Term {
       Ok(error) => Self::new(error),
       Err(error) => match error.downcast::<String>() {
         Ok(error) => Self::new(error),
-        Err(error) => Self::new(format!("unknown error ({error:?})")),
+        Err(ref error) => Self::new(Self::fallback_error(error)),
       },
     }
   }
@@ -250,18 +228,14 @@ impl Term {
       Some(error) => Self::new(error.to_owned()),
       None => match error.downcast_ref::<String>() {
         Some(error) => Self::new(error.to_owned()),
-        None => Self::new(format!("unknown error ({error:?})")),
+        None => Self::new(Self::fallback_error(error)),
       },
     }
   }
-}
 
-impl Clone for Term {
-  #[inline]
-  fn clone(&self) -> Self {
-    Self {
-      data: clone_box(&*self.data),
-    }
+  #[cold]
+  fn fallback_error(error: &dyn Any) -> String {
+    format!("unknown error ({error:?})")
   }
 }
 
@@ -280,7 +254,7 @@ impl Display for Term {
 impl PartialEq for Term {
   #[inline]
   fn eq(&self, other: &Self) -> bool {
-    self.data.eq(&other.data)
+    self.data.dyn_eq(&*other.data)
   }
 }
 
@@ -299,8 +273,13 @@ mod tests {
   }
 
   #[test]
+  fn test_new_str() {
+    assert!(Term::new("test").is::<&str>());
+  }
+
+  #[test]
   fn test_new_string() {
-    assert!(Term::new(String::from("hello")).is::<String>());
+    assert!(Term::new(String::from("test")).is::<String>());
   }
 
   #[test]
@@ -314,7 +293,7 @@ mod tests {
   }
 
   #[test]
-  fn test_is_wrong_type() {
+  fn test_is_with_wrong_type() {
     let term: Term = Term::new(123_i32);
 
     assert!(!term.is::<String>());
@@ -332,22 +311,17 @@ mod tests {
 
   #[test]
   fn test_is_with_tuple() {
-    let term: Term = Term::new((1, "hello", 3.14));
-    assert!(term.is::<(i32, &str, f64)>());
+    assert!(Term::new((1, "hello", 3.14)).is::<(i32, &str, f64)>());
   }
 
   #[test]
   fn test_is_with_option() {
-    let term: Term = Term::new(Some(123));
-
-    assert!(term.is::<Option<i32>>());
-    assert_eq!(term.downcast_ref::<Option<i32>>(), Some(&Some(123)));
+    assert!(Term::new(Some(123)).is::<Option<i32>>());
   }
 
   #[test]
   fn test_is_with_result() {
-    let term: Term = Term::new(Ok::<i32, String>(123));
-    assert!(term.is::<Result<i32, String>>());
+    assert!(Term::new(Ok::<i32, String>(123)).is::<Result<i32, String>>());
   }
 
   #[test]
@@ -361,6 +335,22 @@ mod tests {
   }
 
   #[test]
+  fn test_downcast_ref_string() {
+    assert_eq!(
+      Term::new(String::from("hello")).downcast_ref::<String>(),
+      Some(&String::from("hello"))
+    );
+  }
+
+  #[test]
+  fn test_downcast_ref_vec() {
+    assert_eq!(
+      Term::new(vec![1, 2, 3]).downcast_ref::<Vec<i32>>(),
+      Some(&vec![1, 2, 3])
+    );
+  }
+
+  #[test]
   fn test_downcast_mut_success() {
     let mut term: Term = Term::new(123_i32);
 
@@ -371,20 +361,7 @@ mod tests {
 
   #[test]
   fn test_downcast_mut_failure() {
-    let mut term: Term = Term::new(123_i32);
-    assert!(term.downcast_mut::<String>().is_none());
-  }
-
-  #[test]
-  fn test_downcast_ref_string() {
-    let term: Term = Term::new(String::from("hello"));
-    assert_eq!(term.downcast_ref::<String>(), Some(&String::from("hello")));
-  }
-
-  #[test]
-  fn test_downcast_ref_vec() {
-    let term: Term = Term::new(vec![1, 2, 3]);
-    assert_eq!(term.downcast_ref::<Vec<i32>>(), Some(&vec![1, 2, 3]));
+    assert!(Term::new(123_i32).downcast_mut::<String>().is_none());
   }
 
   #[test]
@@ -420,14 +397,6 @@ mod tests {
   }
 
   #[test]
-  fn test_display() {
-    let src: Term = Term::new(123_i32);
-    let fmt: String = format!("{src}");
-
-    assert_eq!(fmt, "123");
-  }
-
-  #[test]
   fn test_debug() {
     let src: Term = Term::new(123_i32);
     let fmt: String = format!("{src:?}");
@@ -435,7 +404,14 @@ mod tests {
     assert_eq!(fmt, "123");
   }
 
-  #[ignore]
+  #[test]
+  fn test_display_equals_debug() {
+    let src: Term = Term::new(123_i32);
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, format!("{src:?}"));
+  }
+
   #[test]
   fn test_equality() {
     let a: Term = Term::new(123_i32);
