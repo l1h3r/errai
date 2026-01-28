@@ -73,3 +73,51 @@ impl Display for LocalPid {
     write!(f, "#PID<0.x.x>")
   }
 }
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+  use crate::core::LocalPid;
+
+  const BITS: usize = 123;
+
+  #[test]
+  fn test_from_into_bits() {
+    assert_eq!(BITS, LocalPid::from_bits(BITS).into_bits());
+  }
+
+  #[test]
+  fn test_clone() {
+    let src: LocalPid = LocalPid::from_bits(BITS);
+    let dst: LocalPid = src.clone();
+
+    assert_eq!(src, dst);
+  }
+
+  #[test]
+  fn test_copy() {
+    let src: LocalPid = LocalPid::from_bits(BITS);
+    let dst: LocalPid = src;
+
+    assert_eq!(src, dst);
+  }
+
+  #[test]
+  fn test_display() {
+    let src: LocalPid = LocalPid::from_bits(BITS);
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, "#PID<0.x.x>");
+  }
+
+  #[test]
+  fn test_debug_equals_display() {
+    let src: LocalPid = LocalPid::from_bits(BITS);
+    let fmt: String = format!("{src}");
+
+    assert_eq!(fmt, format!("{src:?}"));
+  }
+}
