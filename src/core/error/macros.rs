@@ -3,9 +3,9 @@
 //! Provides two categories of error handling:
 //!
 //! - [`fatal!`]: For unrecoverable runtime bugs (invariant violations)
-//! - [`raise!`]: For recoverable resource exhaustion (capacity limits)
+//! - [`raise!`]: For recoverable system errors (capacity limits)
 
-/// Aborts the program when a system invariant is violated.
+/// Displays a system error message and aborts the program.
 ///
 /// Use this for unrecoverable errors that indicate bugs in the runtime
 /// implementation itself. The program prints a diagnostic message and
@@ -31,7 +31,7 @@ macro_rules! fatal {
   }};
 }
 
-/// Panics when a system capacity limit is reached.
+/// Panics with a recoverable system error.
 ///
 /// Use this for resource exhaustion that may be recoverable at a higher
 /// level (e.g., catching panics, supervision trees). The program panics

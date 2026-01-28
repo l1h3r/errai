@@ -1,4 +1,4 @@
-//! Error handling utilities for system errors.
+//! Error handling utilities.
 
 mod macros;
 
