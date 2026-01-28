@@ -18,6 +18,7 @@ pub use self::types::AliasRef;
 pub use self::types::Atom;
 pub use self::types::Exit;
 pub use self::types::Item;
+pub use self::types::LocalDest;
 pub use self::types::LocalPid;
 pub use self::types::LocalRef;
 pub use self::types::MonitorRef;

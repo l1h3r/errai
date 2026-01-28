@@ -1,12 +1,15 @@
 //! Runtime value types and identifiers.
 
 mod atom;
+mod dest;
 mod exit;
 mod pids;
 mod refs;
 mod term;
 
 pub use self::atom::Atom;
+
+pub use self::dest::LocalDest;
 
 pub use self::exit::Exit;
 
