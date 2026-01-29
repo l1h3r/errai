@@ -20,10 +20,10 @@ pub(crate) struct ThreadId {
 }
 
 impl ThreadId {
-  // The maximum number of permitted worker threads.
+  // The maximum number of worker threads allowed in the system.
   pub(crate) const MAX_THREADS: u32 = 1_u32.strict_shl(18).strict_sub(1);
 
-  /// Returns the unique identifier of the calling thread.
+  /// Returns the unique identifier of the current thread.
   #[inline]
   pub(crate) fn current() -> Result<Self, AccessError> {
     CURRENT.try_with(|thread| {

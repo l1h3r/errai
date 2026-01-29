@@ -16,14 +16,6 @@ use crate::utils::time;
 
 // -----------------------------------------------------------------------------
 // Local Ref
-//
-// # Bit Layout
-//
-// ```text
-// bits[0]: number[0:17]   (18 bits)
-// bits[1]: number[18:31]  (14 bits) | thread[0:17] (18 bits)
-// bits[2]: number[32:63]  (32 bits)
-// ```
 // -----------------------------------------------------------------------------
 
 /// Reference uniquely identifying runtime objects on the local node.

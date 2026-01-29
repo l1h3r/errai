@@ -1,19 +1,3 @@
-//! Local process identifier.
-//!
-//! # Bit Layout (64-bit)
-//!
-//! ```text
-//! ┌─────────┬────────┬────────┬───────┐
-//! │ Serial  │ Number │ Unused │ Tag   │
-//! │ 32 bits │ 28 bits│ 0 bits │ 4 bits│
-//! └─────────┴────────┴────────┴───────┘
-//!           └─── PID_BITS (28/60) ────┘
-//! ```
-//!
-//! - **Tag (4 bits)**: Type discriminator (0x3 for local PIDs)
-//! - **Number (28 bits)**: Process table index
-//! - **Serial (32 bits)**: Reuse counter to avoid aliasing
-
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -30,26 +14,26 @@ impl LocalPid {
   /// Bit width of the type tag field.
   pub(crate) const TAG_BITS: u32 = 4;
 
+  /// Bitmask for extracting the tag field.
+  pub(crate) const TAG_MASK: usize = 1_usize.strict_shl(Self::TAG_BITS).strict_sub(1);
+
   /// Tag value identifying this as a PID type.
   pub(crate) const TAG_DATA: usize = (0x0 << Self::TAG_BITS) | 0x3;
 
-  /// Bitmask for extracting the tag field.
-  pub(crate) const TAG_MASK: usize = 0xF;
-
   /// Bit width of the PID data fields (excluding tag).
-  pub(crate) const PID_BITS: u32 = usize::BITS - Self::TAG_BITS;
+  pub(crate) const PID_BITS: u32 = usize::BITS.strict_sub(Self::TAG_BITS);
+
+  /// Bitmask for extracting the PID data fields.
+  pub(crate) const PID_MASK: usize = 1_usize.strict_shl(Self::PID_BITS).strict_sub(1);
 
   /// Bit width of the process table index field.
   pub(crate) const NUMBER_BITS: u32 = 28;
 
+  /// Bitmask for extracting the process table index field.
+  pub(crate) const NUMBER_MASK: usize = 1_usize.strict_shl(Self::NUMBER_BITS).strict_sub(1);
+
   /// Bit width of the serial number field.
   pub(crate) const SERIAL_BITS: u32 = Self::PID_BITS - Self::NUMBER_BITS;
-
-  /// Bitmask for extracting the PID data fields.
-  pub(crate) const PID_MASK: usize = (1_usize << Self::PID_BITS) - 1;
-
-  /// Bitmask for extracting the process table index field.
-  pub(crate) const NUMBER_MASK: usize = (1_usize << Self::NUMBER_BITS) - 1;
 
   /// The root process always gets the PID `0`.
   pub(crate) const ROOT_PROC: Self = Self::from_bits(0);
