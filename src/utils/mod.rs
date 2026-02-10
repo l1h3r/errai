@@ -1,9 +1,5 @@
-//! Utility types and functions used throughout the runtime.
-//!
-//! # Contents
-//!
-//! - [`CatchUnwind`]: Future wrapper for catching panics
+//! Internal utilities for hashing, threading, etc.
 
-mod futures;
-
-pub(crate) use self::futures::CatchUnwind;
+pub(crate) mod hash;
+pub(crate) mod thread;
+pub(crate) mod time;
