@@ -12,7 +12,6 @@ pub(crate) use self::table::AtomTableError;
 pub(crate) use self::table::ProcAccessError;
 pub(crate) use self::table::ProcInsertError;
 pub(crate) use self::table::ProcTable;
-pub(crate) use self::table::ProcTableKeys;
 
 pub use self::table::MAX_ATOM_BYTES;
 pub use self::table::MAX_ATOM_CHARS;
