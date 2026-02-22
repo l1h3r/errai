@@ -57,9 +57,7 @@ pub(crate) struct ProcTable<T> {
 impl<T> ProcTable<T> {
   #[inline]
   pub(crate) fn new() -> Self {
-    Self {
-      inner: PTab::new(),
-    }
+    Self { inner: PTab::new() }
   }
 
   #[inline]
@@ -132,28 +130,5 @@ impl<T> ProcTable<T> {
 impl<T> Debug for ProcTable<T> {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
     f.write_str("ProcTable { .. }")
-  }
-}
-
-// -----------------------------------------------------------------------------
-// LocalPid <-> Detached
-// -----------------------------------------------------------------------------
-
-impl From<Detached> for LocalPid {
-  #[inline]
-  fn from(other: Detached) -> Self {
-    debug_assert!(other.into_bits() & Self::PID_MASK == other.into_bits());
-
-    let value: usize = other.into_bits() & Self::PID_MASK;
-    let value: usize = (value << Self::TAG_BITS) | Self::TAG_DATA;
-
-    Self::from_bits(value)
-  }
-}
-
-impl From<LocalPid> for Detached {
-  #[inline]
-  fn from(other: LocalPid) -> Self {
-    Detached::from_bits(other.into_bits() >> LocalPid::TAG_BITS)
   }
 }

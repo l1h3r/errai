@@ -1,3 +1,7 @@
+use ptab::Capacity;
+use ptab::Detached;
+use ptab::config::DefaultParams;
+use ptab::config::ParamsExt;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -27,7 +31,7 @@ impl LocalPid {
   pub(crate) const PID_MASK: usize = 1_usize.strict_shl(Self::PID_BITS).strict_sub(1);
 
   /// Bit width of the process table index field.
-  pub(crate) const NUMBER_BITS: u32 = 28;
+  pub(crate) const NUMBER_BITS: u32 = Capacity::MAX.log2().strict_add(1);
 
   /// Bitmask for extracting the process table index field.
   pub(crate) const NUMBER_MASK: usize = 1_usize.strict_shl(Self::NUMBER_BITS).strict_sub(1);
@@ -36,7 +40,7 @@ impl LocalPid {
   pub(crate) const SERIAL_BITS: u32 = Self::PID_BITS - Self::NUMBER_BITS;
 
   /// The root process always gets the PID `0`.
-  pub(crate) const ROOT_PROC: Self = Self::from_bits(0);
+  pub(crate) const ROOT_PROC: Self = Self::from_detached(Detached::from_bits(0));
 
   #[inline]
   pub(crate) const fn from_bits(bits: usize) -> Self {
@@ -46,6 +50,43 @@ impl LocalPid {
   #[inline]
   pub(crate) const fn into_bits(self) -> usize {
     self.bits
+  }
+
+  /// Translates a PID into its `(number, serial)` components.
+  #[inline]
+  const fn decompose(self) -> (u32, u32) {
+    let abstract_idx: usize = self.detached_to_abstract();
+    let number: u32 = (abstract_idx & Self::NUMBER_MASK) as u32;
+    let serial: u32 = (abstract_idx >> Self::NUMBER_BITS) as u32;
+
+    (number, serial)
+  }
+
+  #[inline]
+  const fn from_detached(index: Detached) -> Self {
+    debug_assert!(index.into_bits() & Self::PID_MASK == index.into_bits());
+
+    let value: usize = index.into_bits() & Self::PID_MASK;
+    let value: usize = (value << Self::TAG_BITS) | Self::TAG_DATA;
+
+    Self::from_bits(value)
+  }
+
+  #[inline]
+  const fn into_detached(self) -> Detached {
+    debug_assert!(self.into_bits() & Self::TAG_MASK == Self::TAG_DATA);
+
+    Detached::from_bits(self.into_bits() >> Self::TAG_BITS)
+  }
+
+  // Taken from ptab `src/index.rs`
+  #[inline]
+  const fn detached_to_abstract(self) -> usize {
+    let pid_value: usize = self.into_detached().into_bits();
+    let mut value: usize = pid_value & !DefaultParams::ID_MASK_ENTRY;
+    value |= (pid_value >> DefaultParams::ID_SHIFT_BLOCK) & DefaultParams::ID_MASK_BLOCK;
+    value |= (pid_value & DefaultParams::ID_MASK_INDEX) << DefaultParams::ID_SHIFT_INDEX;
+    value
   }
 }
 
@@ -57,7 +98,26 @@ impl Debug for LocalPid {
 
 impl Display for LocalPid {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-    write!(f, "#PID<0.x.x>")
+    let (number, serial): (u32, u32) = self.decompose();
+    write!(f, "#PID<0.{number}.{serial}>")
+  }
+}
+
+// -----------------------------------------------------------------------------
+// LocalPid <-> Detached
+// -----------------------------------------------------------------------------
+
+impl From<Detached> for LocalPid {
+  #[inline]
+  fn from(other: Detached) -> Self {
+    Self::from_detached(other)
+  }
+}
+
+impl From<LocalPid> for Detached {
+  #[inline]
+  fn from(other: LocalPid) -> Self {
+    other.into_detached()
   }
 }
 
@@ -67,9 +127,13 @@ impl Display for LocalPid {
 
 #[cfg(test)]
 mod tests {
+  use ptab::Detached;
+  use ptab::config::CACHE_LINE_SLOTS;
+
   use crate::core::LocalPid;
 
-  const BITS: usize = 123;
+  const DATA: Detached = Detached::from_bits(123 * CACHE_LINE_SLOTS);
+  const BITS: usize = LocalPid::from_detached(DATA).into_bits();
 
   #[test]
   fn test_from_into_bits() {
@@ -97,7 +161,7 @@ mod tests {
     let src: LocalPid = LocalPid::from_bits(BITS);
     let fmt: String = format!("{src}");
 
-    assert_eq!(fmt, "#PID<0.x.x>");
+    assert_eq!(fmt, "#PID<0.123.0>");
   }
 
   #[test]
