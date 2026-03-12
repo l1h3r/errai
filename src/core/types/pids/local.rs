@@ -30,15 +30,6 @@ impl LocalPid {
   /// Bitmask for extracting the PID data fields.
   pub(crate) const PID_MASK: usize = 1_usize.strict_shl(Self::PID_BITS).strict_sub(1);
 
-  /// Bit width of the process table index field.
-  pub(crate) const NUMBER_BITS: u32 = Capacity::MAX.log2().strict_add(1);
-
-  /// Bitmask for extracting the process table index field.
-  pub(crate) const NUMBER_MASK: usize = 1_usize.strict_shl(Self::NUMBER_BITS).strict_sub(1);
-
-  /// Bit width of the serial number field.
-  pub(crate) const SERIAL_BITS: u32 = Self::PID_BITS - Self::NUMBER_BITS;
-
   /// The root process always gets the PID `0`.
   pub(crate) const ROOT_PROC: Self = Self::from_detached(Detached::from_bits(0));
 
@@ -52,14 +43,9 @@ impl LocalPid {
     self.bits
   }
 
-  /// Translates a PID into its `(number, serial)` components.
   #[inline]
   const fn decompose(self) -> (u32, u32) {
-    let abstract_idx: usize = self.detached_to_abstract();
-    let number: u32 = (abstract_idx & Self::NUMBER_MASK) as u32;
-    let serial: u32 = (abstract_idx >> Self::NUMBER_BITS) as u32;
-
-    (number, serial)
+    self.into_detached().decompose::<DefaultParams>()
   }
 
   #[inline]
@@ -77,16 +63,6 @@ impl LocalPid {
     debug_assert!(self.into_bits() & Self::TAG_MASK == Self::TAG_DATA);
 
     Detached::from_bits(self.into_bits() >> Self::TAG_BITS)
-  }
-
-  // Taken from ptab `src/index.rs`
-  #[inline]
-  const fn detached_to_abstract(self) -> usize {
-    let pid_value: usize = self.into_detached().into_bits();
-    let mut value: usize = pid_value & !DefaultParams::ID_MASK_ENTRY;
-    value |= (pid_value >> DefaultParams::ID_SHIFT_BLOCK) & DefaultParams::ID_MASK_BLOCK;
-    value |= (pid_value & DefaultParams::ID_MASK_INDEX) << DefaultParams::ID_SHIFT_INDEX;
-    value
   }
 }
 
