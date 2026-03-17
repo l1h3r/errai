@@ -4,3 +4,4 @@ compile_error!("errai requires a 32-bit or 64-bit architecture");
 mod utils;
 
 pub mod core;
+pub mod erts;
