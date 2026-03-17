@@ -541,6 +541,7 @@ impl Process {
   }
 
   /// Accesses the current task-local process context and runs the given function.
+  #[track_caller]
   #[inline]
   pub(crate) fn with<F, R>(f: F) -> R
   where

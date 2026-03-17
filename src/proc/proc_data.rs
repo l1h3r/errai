@@ -70,12 +70,6 @@ unsafe impl Send for ProcData {}
 // The `internal` field is only accessed from the owning task via TaskGuard.
 unsafe impl Sync for ProcData {}
 
-impl Drop for ProcData {
-  fn drop(&mut self) {
-    tracing::trace!(pid = %self.readonly.mpid, "Proc Drop");
-  }
-}
-
 // -----------------------------------------------------------------------------
 // Proc Read-only
 // -----------------------------------------------------------------------------
@@ -261,6 +255,16 @@ impl ProcInternal {
       dictionary: ProcDict::new(),
       group_leader: InternalPid::from_bits(0),
     }
+  }
+
+  /// Appends a message to the end of the process inbox. The caller must
+  /// ensure signal-ordering is preserved.
+  #[inline]
+  pub(crate) fn send<M>(&mut self, message: M)
+  where
+    M: Into<DynMessage>,
+  {
+    self.inbox.push(message.into());
   }
 }
 

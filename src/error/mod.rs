@@ -75,6 +75,16 @@ pub use self::exception_group::ExceptionGroup;
 /// ```
 #[macro_export]
 macro_rules! raise {
+  (Error, SysInv, $error:expr $(,)?) => {{
+    ::std::eprintln!(
+      "{}:{}: internal error: {}",
+      ::std::file!(),
+      ::std::line!(),
+      $error,
+    );
+
+    ::std::process::abort()
+  }};
   ($class:ident, $group:ident, $error:expr $(,)?) => {
     ::std::panic!(
       "{}",
@@ -103,10 +113,5 @@ mod tests {
   #[test]
   fn test_raise_macro_syscap() {
     assert!(panic::catch_unwind(|| raise!(Error, SysCap, "table full")).is_err());
-  }
-
-  #[test]
-  fn test_raise_macro_sysinv() {
-    assert!(panic::catch_unwind(|| raise!(Error, SysInv, "invalid state")).is_err());
   }
 }

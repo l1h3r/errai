@@ -7,6 +7,7 @@
 // <https://www.erlang.org/doc/apps/erts/erl_dist_protocol#link_protocol>
 use hashbrown::hash_map::Entry;
 use std::num::NonZeroU64;
+use tracing::Level;
 use tracing::Span;
 use tracing::span;
 
@@ -24,6 +25,41 @@ use crate::proc::ProcInternal;
 use crate::proc::ProcLink;
 use crate::proc::ProcMonitor;
 use crate::proc::ProcReadOnly;
+
+macro_rules! trace_span {
+  ($parent:expr, $name:expr, $($fields:tt)*) => {
+    ::tracing::span!(
+      target: "errai",
+      parent: $parent,
+      ::tracing::Level::TRACE,
+      $name,
+      $($fields)*
+    )
+  };
+}
+
+macro_rules! trace_enter {
+  ($parent:expr) => {
+    ::tracing::trace!(
+      name: "signal",
+      target: "errai",
+      parent: $parent,
+      action = "enter",
+    );
+  };
+}
+
+macro_rules! trace_leave {
+  ($parent:expr, $result:expr) => {
+    ::tracing::trace!(
+      name: "signal",
+      target: "errai",
+      parent: $parent,
+      action = "leave",
+      result = $result,
+    );
+  };
+}
 
 // -----------------------------------------------------------------------------
 // Signal Emit
@@ -61,7 +97,7 @@ pub(crate) trait SignalRecv {
   /// - Add/remove links or monitors
   /// - Enqueue messages in the inbox
   /// - Modify process flags
-  fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit>;
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit>;
 }
 
 // -----------------------------------------------------------------------------
@@ -80,27 +116,8 @@ pub(crate) enum Signal {
   Control(ControlSignal),
 }
 
-impl Signal {
-  /// Returns the signal category as a short string ("M" or "C").
-  #[inline]
-  const fn kind(&self) -> &'static str {
-    match self {
-      Self::Message(_) => "M",
-      Self::Control(_) => "C",
-    }
-  }
-
-  /// Returns the sender PID.
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    match self {
-      Self::Message(signal) => signal.from(),
-      Self::Control(signal) => signal.from(),
-    }
-  }
-}
-
 impl SignalEmit for Signal {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     match self {
       Self::Message(signal) => signal.emit(to),
@@ -110,18 +127,10 @@ impl SignalEmit for Signal {
 }
 
 impl SignalRecv for Signal {
-  fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
-    let span: Span = tracing::trace_span!(
-      "Proc Signal",
-      mpid = %readonly.mpid,
-      from = %self.from(),
-    );
-
-    let _enter: span::Entered<'_> = span.enter();
-
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     match self {
-      Self::Message(signal) => signal.recv(readonly, internal),
-      Self::Control(signal) => signal.recv(readonly, internal),
+      Self::Message(signal) => signal.recv(span, readonly, internal),
+      Self::Control(signal) => signal.recv(span, readonly, internal),
     }
   }
 }
@@ -136,16 +145,8 @@ pub(crate) enum MessageSignal {
   Send(SignalSend),
 }
 
-impl MessageSignal {
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    match self {
-      Self::Send(signal) => signal.from(),
-    }
-  }
-}
-
 impl SignalEmit for MessageSignal {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     match self {
       Self::Send(signal) => signal.emit(to),
@@ -154,9 +155,10 @@ impl SignalEmit for MessageSignal {
 }
 
 impl SignalRecv for MessageSignal {
-  fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+  #[inline]
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     match self {
-      Self::Send(signal) => signal.recv(readonly, internal),
+      Self::Send(signal) => signal.recv(span, readonly, internal),
     }
   }
 }
@@ -208,23 +210,8 @@ pub(crate) enum ControlSignal {
   Demonitor(SignalDemonitor),
 }
 
-impl ControlSignal {
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    match self {
-      Self::Exit(signal) => signal.from(),
-      Self::Link(signal) => signal.from(),
-      Self::LinkExit(signal) => signal.from(),
-      Self::Unlink(signal) => signal.from(),
-      Self::UnlinkAck(signal) => signal.from(),
-      Self::Monitor(signal) => signal.from(),
-      Self::MonitorDown(signal) => signal.from(),
-      Self::Demonitor(signal) => signal.from(),
-    }
-  }
-}
-
 impl SignalEmit for ControlSignal {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     match self {
       Self::Exit(signal) => signal.emit(to),
@@ -240,16 +227,16 @@ impl SignalEmit for ControlSignal {
 }
 
 impl SignalRecv for ControlSignal {
-  fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
     match self {
-      Self::Exit(signal) => signal.recv(readonly, internal),
-      Self::Link(signal) => signal.recv(readonly, internal),
-      Self::LinkExit(signal) => signal.recv(readonly, internal),
-      Self::Unlink(signal) => signal.recv(readonly, internal),
-      Self::UnlinkAck(signal) => signal.recv(readonly, internal),
-      Self::Monitor(signal) => signal.recv(readonly, internal),
-      Self::MonitorDown(signal) => signal.recv(readonly, internal),
-      Self::Demonitor(signal) => signal.recv(readonly, internal),
+      Self::Exit(signal) => signal.recv(span, readonly, internal),
+      Self::Link(signal) => signal.recv(span, readonly, internal),
+      Self::LinkExit(signal) => signal.recv(span, readonly, internal),
+      Self::Unlink(signal) => signal.recv(span, readonly, internal),
+      Self::UnlinkAck(signal) => signal.recv(span, readonly, internal),
+      Self::Monitor(signal) => signal.recv(span, readonly, internal),
+      Self::MonitorDown(signal) => signal.recv(span, readonly, internal),
+      Self::Demonitor(signal) => signal.recv(span, readonly, internal),
     }
   }
 }
@@ -328,32 +315,36 @@ impl SignalSend {
   pub(crate) const fn new(from: InternalPid, data: DynMessage) -> Self {
     Self { from, data }
   }
-
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    self.from
-  }
 }
 
 impl SignalEmit for SignalSend {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     to.send.send(Signal::Message(self.into()));
   }
 }
 
-// Send signal handling:
-//
-// The content of the message is moved to the internal inbox buffer.
 impl SignalRecv for SignalSend {
   /// Enqueues the message in the inbox.
   ///
   /// This signal never causes termination.
-  fn recv(self, _readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
-    tracing::trace!(signal = "send");
+  fn recv(
+    self,
+    span: &Span,
+    _readonly: &ProcReadOnly,
+    internal: &mut ProcInternal,
+  ) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-send",
+      from = %self.from,
+    );
+
+    trace_enter!(&span);
 
     internal.inbox.push(self.data);
 
-    tracing::trace!(result = "enqueue");
+    trace_leave!(&span, "enqueue");
 
     None
   }
@@ -378,14 +369,10 @@ impl SignalExit {
   pub(crate) const fn new(from: InternalPid, exit: Exit) -> Self {
     Self { from, exit }
   }
-
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    self.from
-  }
 }
 
 impl SignalEmit for SignalExit {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     to.send.send(Signal::Control(self.into()));
   }
@@ -408,31 +395,38 @@ impl SignalRecv for SignalExit {
   ///
   /// - **trap_exit enabled**: Converted to EXIT message
   /// - **trap_exit disabled**: Terminates process
-  fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
-    tracing::trace!(signal = "exit", exit = %self.exit);
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-exit",
+      from = %self.from,
+      exit = %self.exit,
+    );
+
+    trace_enter!(&span);
 
     match self.exit {
       Exit::Atom(atom) if atom == Atom::NORMAL => {
         if internal.flags.contains(ProcessFlags::TRAP_EXIT) {
-          readonly.send_message(self.from, ExitMessage::new(self.from, self.exit));
-          tracing::trace!(result = "trapped", reason = "proc flag");
+          internal.send(ExitMessage::new(self.from, self.exit));
+          trace_leave!(&span, "trapped");
         } else if self.from == readonly.mpid {
-          tracing::trace!(result = "terminated", reason = "self-destruct");
+          trace_leave!(&span, "self-destruct");
           return Some(self.exit);
         } else {
-          tracing::trace!(result = "ignored");
+          trace_leave!(&span, "ignored (normal)");
         }
       }
       Exit::Atom(atom) if atom == Atom::KILLED => {
-        tracing::trace!(result = "terminated", reason = "killed");
+        trace_leave!(&span, "terminated (killed)");
         return Some(self.exit);
       }
       Exit::Atom(_) | Exit::Term(_) => {
         if internal.flags.contains(ProcessFlags::TRAP_EXIT) {
-          readonly.send_message(self.from, ExitMessage::new(self.from, self.exit));
-          tracing::trace!(result = "trapped", reason = "proc flag");
+          internal.send(ExitMessage::new(self.from, self.exit));
+          trace_leave!(&span, "trapped");
         } else {
-          tracing::trace!(result = "terminated", reason = "custom");
+          trace_leave!(&span, "terminated (custom)");
           return Some(self.exit);
         }
       }
@@ -460,14 +454,10 @@ impl SignalLink {
   pub(crate) const fn new(from: InternalPid) -> Self {
     Self { from }
   }
-
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    self.from
-  }
 }
 
 impl SignalEmit for SignalLink {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     to.send.send(Signal::Control(self.into()));
   }
@@ -478,16 +468,27 @@ impl SignalRecv for SignalLink {
   ///
   /// If a link already exists for the sender, this signal is ignored.
   /// Otherwise, a new enabled link is created.
-  fn recv(self, _readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
-    tracing::trace!(signal = "link");
+  fn recv(
+    self,
+    span: &Span,
+    _readonly: &ProcReadOnly,
+    internal: &mut ProcInternal,
+  ) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-link",
+      from = %self.from,
+    );
+
+    trace_enter!(&span);
 
     match internal.links.entry(self.from) {
       Entry::Occupied(_) => {
-        tracing::trace!(result = "ignored", reason = "old link");
+        trace_leave!(&span, "ignored (occupied)");
       }
       Entry::Vacant(entry) => {
         entry.insert(ProcLink::new());
-        tracing::trace!(result = "handled", reason = "new link");
+        trace_leave!(&span, "linked");
       }
     }
 
@@ -514,14 +515,10 @@ impl SignalLinkExit {
   pub(crate) const fn new(from: InternalPid, exit: Exit) -> Self {
     Self { from, exit }
   }
-
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    self.from
-  }
 }
 
 impl SignalEmit for SignalLinkExit {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     to.send.send(Signal::Control(self.into()));
   }
@@ -543,30 +540,42 @@ impl SignalRecv for SignalLinkExit {
   ///
   /// - No link exists
   /// - Link is disabled (unlink in progress)
-  fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
-    tracing::trace!(signal = "link exit", exit = %self.exit);
+  fn recv(
+    self,
+    span: &Span,
+    _readonly: &ProcReadOnly,
+    internal: &mut ProcInternal,
+  ) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-link-exit",
+      from = %self.from,
+      exit = %self.exit,
+    );
+
+    trace_enter!(&span);
 
     match internal.links.entry(self.from) {
       Entry::Occupied(entry) => {
         if entry.get().is_enabled() {
           if internal.flags.contains(ProcessFlags::TRAP_EXIT) {
-            readonly.send_message(self.from, ExitMessage::new(self.from, self.exit));
-            tracing::trace!(result = "trapped", reason = "proc flag");
+            internal.send(ExitMessage::new(self.from, self.exit));
+            trace_leave!(&span, "trapped");
           } else if self.exit.is_normal() {
-            tracing::trace!(result = "ignored", reason = "normal");
+            trace_leave!(&span, "ignored (normal)");
           } else if self.exit.is_killed() {
-            tracing::trace!(result = "terminated", reason = "killed");
+            trace_leave!(&span, "terminated (killed)");
             return Some(self.exit);
           } else {
-            tracing::trace!(result = "terminated", reason = "custom");
+            trace_leave!(&span, "terminated (custom)");
             return Some(self.exit);
           }
         } else {
-          tracing::trace!(result = "ignored", reason = "link disabled");
+          trace_leave!(&span, "disabled");
         }
       }
       Entry::Vacant(_) => {
-        tracing::trace!(result = "ignored", reason = "no link");
+        trace_leave!(&span, "ignored (vacant)");
       }
     }
 
@@ -593,14 +602,10 @@ impl SignalUnlink {
   pub(crate) const fn new(from: InternalPid, ulid: NonZeroU64) -> Self {
     Self { from, ulid }
   }
-
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    self.from
-  }
 }
 
 impl SignalEmit for SignalUnlink {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     to.send.send(Signal::Control(self.into()));
   }
@@ -618,27 +623,34 @@ impl SignalRecv for SignalUnlink {
   ///
   /// - No link exists
   /// - Link is already disabled
-  fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
-    tracing::trace!(signal = "unlink", ulid = %self.ulid);
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-unlink",
+      from = %self.from,
+      ulid = %self.ulid,
+    );
+
+    trace_enter!(&span);
 
     match internal.links.entry(self.from) {
       Entry::Occupied(entry) => {
         if entry.get().is_disabled() {
-          tracing::trace!(result = "ignored", reason = "link disabled");
+          trace_leave!(&span, "disabled");
           return None;
         }
 
         if let Some(proc) = bifs::proc_find(self.from) {
           proc.readonly.send_unlink_ack(readonly.mpid, self.ulid);
-          tracing::trace!(result = "handled", reason = "good PID");
+          trace_leave!(&span, "acknowledged");
         } else {
-          tracing::trace!(result = "ignored", reason = "dead PID");
+          trace_leave!(&span, "ignored (dead)");
         }
 
         entry.remove();
       }
       Entry::Vacant(_) => {
-        tracing::trace!(result = "ignored", reason = "no link");
+        trace_leave!(&span, "ignored (vacant)");
       }
     }
 
@@ -665,14 +677,10 @@ impl SignalUnlinkAck {
   pub(crate) const fn new(from: InternalPid, ulid: NonZeroU64) -> Self {
     Self { from, ulid }
   }
-
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    self.from
-  }
 }
 
 impl SignalEmit for SignalUnlinkAck {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     to.send.send(Signal::Control(self.into()));
   }
@@ -690,24 +698,36 @@ impl SignalRecv for SignalUnlinkAck {
   ///
   /// - The link was re-enabled
   /// - A stale acknowledgment arrives
-  fn recv(self, _readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
-    tracing::trace!(signal = "unlink ack", ulid = %self.ulid);
+  fn recv(
+    self,
+    span: &Span,
+    _readonly: &ProcReadOnly,
+    internal: &mut ProcInternal,
+  ) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-unlink-ack",
+      from = %self.from,
+      ulid = %self.ulid,
+    );
+
+    trace_enter!(&span);
 
     match internal.links.entry(self.from) {
       Entry::Occupied(entry) => {
         if entry.get().is_disabled() {
           if entry.get().matches(self.ulid) {
             entry.remove();
-            tracing::trace!(result = "handled", reason = "fresh ulid");
+            trace_leave!(&span, "unlinked");
           } else {
-            tracing::trace!(result = "ignored", reason = "stale ulid");
+            trace_leave!(&span, "ignored (stale)");
           }
         } else {
-          tracing::trace!(result = "ignored", reason = "link enabled");
+          trace_leave!(&span, "ignored (enabled)");
         }
       }
       Entry::Vacant(_) => {
-        tracing::trace!(result = "ignored", reason = "no link");
+        trace_leave!(&span, "ignored (vacant)");
       }
     }
 
@@ -735,14 +755,10 @@ impl SignalMonitor {
   pub(crate) const fn new(from: InternalPid, mref: MonitorRef, item: ExternalDest) -> Self {
     Self { from, mref, item }
   }
-
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    self.from
-  }
 }
 
 impl SignalEmit for SignalMonitor {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     to.send.send(Signal::Control(self.into()));
   }
@@ -753,16 +769,29 @@ impl SignalRecv for SignalMonitor {
   ///
   /// If a monitor with the same reference already exists, this signal is
   /// ignored. Otherwise, monitor state is created.
-  fn recv(self, _readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
-    tracing::trace!(signal = "monitor", mref = %self.mref, item = %self.item);
+  fn recv(
+    self,
+    span: &Span,
+    _readonly: &ProcReadOnly,
+    internal: &mut ProcInternal,
+  ) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-monitor",
+      from = %self.from,
+      mref = %self.mref,
+      item = %self.item,
+    );
+
+    trace_enter!(&span);
 
     match internal.monitor_recv.entry(self.mref) {
       Entry::Occupied(_) => {
-        tracing::trace!(result = "ignored", reason = "occupied");
+        trace_leave!(&span, "ignored (occupied)");
       }
       Entry::Vacant(entry) => {
         entry.insert(ProcMonitor::new(self.from, self.item));
-        tracing::trace!(result = "handled");
+        trace_leave!(&span, "monitored");
       }
     }
 
@@ -790,14 +819,10 @@ impl SignalMonitorDown {
   pub(crate) const fn new(from: InternalPid, mref: MonitorRef, info: Exit) -> Self {
     Self { from, mref, info }
   }
-
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    self.from
-  }
 }
 
 impl SignalEmit for SignalMonitorDown {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     to.send.send(Signal::Control(self.into()));
   }
@@ -812,24 +837,28 @@ impl SignalRecv for SignalMonitorDown {
   /// 2. Removes the monitor state
   ///
   /// Ignored if no monitor state exists (monitor was removed).
-  fn recv(self, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
-    tracing::trace!(signal = "monitor down", mref = %self.mref);
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-monitor-down",
+      from = %self.from,
+      mref = %self.mref,
+      info = %self.info,
+    );
+
+    trace_enter!(&span);
 
     match internal.monitor_send.entry(self.mref) {
       Entry::Occupied(entry) => {
-        let state: &ProcMonitor = entry.get();
+        let data: ProcMonitor = entry.remove();
+        let dest: ExternalDest = data.target();
 
-        readonly.send_message(
-          state.origin(),
-          DownMessage::new(self.mref, state.target(), self.info),
-        );
+        internal.send(DownMessage::new(self.mref, dest, self.info));
 
-        entry.remove();
-
-        tracing::trace!(result = "handled", reason = "good mref");
+        trace_leave!(&span, "trapped");
       }
       Entry::Vacant(_) => {
-        tracing::trace!(result = "ignored", reason = "no monitor");
+        trace_leave!(&span, "ignored (vacant)");
       }
     }
 
@@ -856,14 +885,10 @@ impl SignalDemonitor {
   pub(crate) const fn new(from: InternalPid, mref: MonitorRef) -> Self {
     Self { from, mref }
   }
-
-  #[inline]
-  const fn from(&self) -> InternalPid {
-    self.from
-  }
 }
 
 impl SignalEmit for SignalDemonitor {
+  #[inline]
   fn emit(self, to: &ProcReadOnly) {
     to.send.send(Signal::Control(self.into()));
   }
@@ -873,16 +898,28 @@ impl SignalRecv for SignalDemonitor {
   /// Removes monitor state if it exists.
   ///
   /// Ignored if no monitor state exists for the reference.
-  fn recv(self, _readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
-    tracing::trace!(signal = "demonitor", mref = %self.mref);
+  fn recv(
+    self,
+    span: &Span,
+    _readonly: &ProcReadOnly,
+    internal: &mut ProcInternal,
+  ) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-demonitor",
+      from = %self.from,
+      mref = %self.mref,
+    );
+
+    trace_enter!(&span);
 
     match internal.monitor_recv.entry(self.mref) {
       Entry::Occupied(entry) => {
         entry.remove();
-        tracing::trace!(result = "handled", reason = "good mref");
+        trace_leave!(&span, "demonitored");
       }
       Entry::Vacant(_) => {
-        tracing::trace!(result = "ignored", reason = "no monitor");
+        trace_leave!(&span, "ignored (vacant)");
       }
     }
 

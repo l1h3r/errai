@@ -220,6 +220,7 @@ impl ProcSend {
   ///
   /// Panics if the receiver has been dropped. This should only happen during
   /// runtime shutdown or if there's a bug in the lifecycle management.
+  #[track_caller]
   #[inline]
   pub(crate) fn send(&self, signal: Signal) {
     if let Err(error) = self.inner.send(signal) {

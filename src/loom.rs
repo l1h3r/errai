@@ -11,11 +11,11 @@ pub(crate) mod export {
   }
 
   pub(crate) mod sync {
-    pub(crate) use parking_lot::Mutex;
     pub(crate) use parking_lot::RwLock;
     pub(crate) use std::sync::Barrier;
 
     pub(crate) mod atomic {
+      pub(crate) use std::sync::atomic::AtomicBool;
       pub(crate) use std::sync::atomic::AtomicPtr;
       pub(crate) use std::sync::atomic::AtomicU32;
       pub(crate) use std::sync::atomic::AtomicU64;
@@ -39,10 +39,10 @@ pub(crate) mod export {
 
   pub(crate) mod sync {
     pub(crate) use loom::sync::Barrier;
-    pub(crate) use loom::sync::Mutex;
     pub(crate) use loom::sync::RwLock;
 
     pub(crate) mod atomic {
+      pub(crate) use loom::sync::atomic::AtomicBool;
       pub(crate) use loom::sync::atomic::AtomicPtr;
       pub(crate) use loom::sync::atomic::AtomicU32;
       pub(crate) use loom::sync::atomic::AtomicU64;
