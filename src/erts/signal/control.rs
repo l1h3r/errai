@@ -1,9 +1,25 @@
+use hashbrown::hash_map::Entry;
 use std::num::NonZeroU64;
+use tracing::Span;
 
+use crate::core::Atom;
+use crate::core::DownMessage;
 use crate::core::Exit;
+use crate::core::ExitMessage;
 use crate::core::LocalDest;
 use crate::core::LocalPid;
 use crate::core::MonitorRef;
+use crate::erts::ProcFlags;
+use crate::erts::ProcInternal;
+use crate::erts::ProcLink;
+use crate::erts::ProcMonitor;
+use crate::erts::ProcReadOnly;
+use crate::erts::Signal;
+use crate::erts::SignalEmit;
+use crate::erts::SignalRecv;
+use crate::erts::signal::trace_enter;
+use crate::erts::signal::trace_leave;
+use crate::erts::signal::trace_span;
 
 // -----------------------------------------------------------------------------
 // Control Signal
@@ -43,6 +59,38 @@ pub(crate) enum ControlSignal {
   MonitorDown(SignalMonitorDown),
   /// Remove a monitor on a process.
   Demonitor(SignalDemonitor),
+}
+
+impl SignalEmit for ControlSignal {
+  #[inline]
+  fn emit(self, to: &ProcReadOnly) {
+    match self {
+      Self::Exit(signal) => signal.emit(to),
+      Self::Link(signal) => signal.emit(to),
+      Self::LinkExit(signal) => signal.emit(to),
+      Self::Unlink(signal) => signal.emit(to),
+      Self::UnlinkAck(signal) => signal.emit(to),
+      Self::Monitor(signal) => signal.emit(to),
+      Self::MonitorDown(signal) => signal.emit(to),
+      Self::Demonitor(signal) => signal.emit(to),
+    }
+  }
+}
+
+impl SignalRecv for ControlSignal {
+  #[inline]
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    match self {
+      Self::Exit(signal) => signal.recv(span, readonly, internal),
+      Self::Link(signal) => signal.recv(span, readonly, internal),
+      Self::LinkExit(signal) => signal.recv(span, readonly, internal),
+      Self::Unlink(signal) => signal.recv(span, readonly, internal),
+      Self::UnlinkAck(signal) => signal.recv(span, readonly, internal),
+      Self::Monitor(signal) => signal.recv(span, readonly, internal),
+      Self::MonitorDown(signal) => signal.recv(span, readonly, internal),
+      Self::Demonitor(signal) => signal.recv(span, readonly, internal),
+    }
+  }
 }
 
 impl From<SignalExit> for ControlSignal {
@@ -122,6 +170,71 @@ impl SignalExit {
   }
 }
 
+impl SignalEmit for SignalExit {
+  #[inline]
+  fn emit(self, to: &ProcReadOnly) {
+    to.send.send(Signal::Control(self.into()));
+  }
+}
+
+impl SignalRecv for SignalExit {
+  /// Processes the exit signal according to its reason and flags.
+  ///
+  /// # Normal Exits
+  ///
+  /// - **trap_exit enabled**: Converted to EXIT message
+  /// - **Self-sent**: Terminates process
+  /// - **Other sender**: Ignored
+  ///
+  /// # Kill Exits
+  ///
+  /// Always terminate the process (cannot be trapped).
+  ///
+  /// # Custom Exits
+  ///
+  /// - **trap_exit enabled**: Converted to EXIT message
+  /// - **trap_exit disabled**: Terminates process
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-exit",
+      from = %self.from,
+      exit = %self.exit,
+    );
+
+    trace_enter!(&span);
+
+    match self.exit {
+      Exit::Atom(atom) if atom == Atom::NORMAL => {
+        if internal.flags.contains(ProcFlags::TRAP_EXIT) {
+          internal.send(ExitMessage::new(self.from, self.exit));
+          trace_leave!(&span, "trapped");
+        } else if self.from == readonly.mpid {
+          trace_leave!(&span, "self-destruct");
+          return Some(self.exit);
+        } else {
+          trace_leave!(&span, "ignored (normal)");
+        }
+      }
+      Exit::Atom(atom) if atom == Atom::KILL => {
+        trace_leave!(&span, "terminated (kill)");
+        return Some(Exit::KILLED);
+      }
+      Exit::Atom(_) | Exit::Term(_) => {
+        if internal.flags.contains(ProcFlags::TRAP_EXIT) {
+          internal.send(ExitMessage::new(self.from, self.exit));
+          trace_leave!(&span, "trapped");
+        } else {
+          trace_leave!(&span, "terminated (custom)");
+          return Some(self.exit);
+        }
+      }
+    }
+
+    None
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Signal - Link
 // -----------------------------------------------------------------------------
@@ -139,6 +252,41 @@ impl SignalLink {
   #[inline]
   pub(crate) const fn new(from: LocalPid) -> Self {
     Self { from }
+  }
+}
+
+impl SignalEmit for SignalLink {
+  #[inline]
+  fn emit(self, to: &ProcReadOnly) {
+    to.send.send(Signal::Control(self.into()));
+  }
+}
+
+impl SignalRecv for SignalLink {
+  /// Establishes a link if one doesn't already exist.
+  ///
+  /// If a link already exists for the sender, this signal is ignored.
+  /// Otherwise, a new enabled link is created.
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-link",
+      from = %self.from,
+    );
+
+    trace_enter!(&span);
+
+    match internal.links.entry(self.from) {
+      Entry::Occupied(_) => {
+        trace_leave!(&span, "ignored (occupied)");
+      }
+      Entry::Vacant(entry) => {
+        entry.insert(ProcLink::new());
+        trace_leave!(&span, "linked");
+      }
+    }
+
+    None
   }
 }
 
@@ -163,6 +311,73 @@ impl SignalLinkExit {
   }
 }
 
+impl SignalEmit for SignalLinkExit {
+  #[inline]
+  fn emit(self, to: &ProcReadOnly) {
+    to.send.send(Signal::Control(self.into()));
+  }
+}
+
+impl SignalRecv for SignalLinkExit {
+  /// Processes exit signal from a linked process.
+  ///
+  /// # Processing Rules
+  ///
+  /// Requires an active (enabled) link to the sender:
+  ///
+  /// - **trap_exit enabled**: Converted to EXIT message
+  /// - **Normal exit**: Ignored (doesn't propagate)
+  /// - **Kill exit**: Terminates process
+  /// - **Custom exit**: Terminates process
+  ///
+  /// Signals are ignored if:
+  ///
+  /// - No link exists
+  /// - Link is disabled (unlink in progress)
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-link-exit",
+      from = %self.from,
+      exit = %self.exit,
+    );
+
+    trace_enter!(&span);
+
+    match internal.links.entry(self.from) {
+      Entry::Occupied(entry) => {
+        if entry.get().is_enabled() {
+          if internal.flags.contains(ProcFlags::TRAP_EXIT) {
+            internal.send(ExitMessage::new(self.from, self.exit));
+            trace_leave!(&span, "trapped");
+          } else {
+            match self.exit {
+              Exit::Atom(atom) if atom == Atom::NORMAL => {
+                trace_leave!(&span, "ignored (normal)");
+              }
+              Exit::Atom(atom) if atom == Atom::KILL => {
+                trace_leave!(&span, "terminated (kill)");
+                return Some(self.exit);
+              }
+              Exit::Atom(_) | Exit::Term(_) => {
+                trace_leave!(&span, "terminated (custom)");
+                return Some(self.exit);
+              }
+            }
+          }
+        } else {
+          trace_leave!(&span, "disabled");
+        }
+      }
+      Entry::Vacant(_) => {
+        trace_leave!(&span, "ignored (vacant)");
+      }
+    }
+
+    None
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Signal - Unlink
 // -----------------------------------------------------------------------------
@@ -184,6 +399,55 @@ impl SignalUnlink {
   }
 }
 
+impl SignalEmit for SignalUnlink {
+  #[inline]
+  fn emit(self, to: &ProcReadOnly) {
+    to.send.send(Signal::Control(self.into()));
+  }
+}
+
+impl SignalRecv for SignalUnlink {
+  /// Processes unlink request and sends acknowledgment.
+  ///
+  /// If an enabled link exists:
+  ///
+  /// 1. Sends UnlinkAck back to the sender (if sender still exists)
+  /// 2. Removes the link
+  ///
+  /// Signals are ignored if:
+  ///
+  /// - No link exists
+  /// - Link is already disabled
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-unlink",
+      from = %self.from,
+      ulid = %self.ulid,
+    );
+
+    trace_enter!(&span);
+
+    match internal.links.entry(self.from) {
+      Entry::Occupied(entry) => {
+        if entry.get().is_disabled() {
+          trace_leave!(&span, "disabled");
+          return None;
+        }
+
+        entry.remove();
+
+        // TODO: Send Ack
+      }
+      Entry::Vacant(_) => {
+        trace_leave!(&span, "ignored (vacant)");
+      }
+    }
+
+    None
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Signal - UnlinkAck
 // -----------------------------------------------------------------------------
@@ -202,6 +466,57 @@ impl SignalUnlinkAck {
   #[inline]
   pub(crate) const fn new(from: LocalPid, ulid: NonZeroU64) -> Self {
     Self { from, ulid }
+  }
+}
+
+impl SignalEmit for SignalUnlinkAck {
+  #[inline]
+  fn emit(self, to: &ProcReadOnly) {
+    to.send.send(Signal::Control(self.into()));
+  }
+}
+
+impl SignalRecv for SignalUnlinkAck {
+  /// Completes the unlink if the ID matches.
+  ///
+  /// The link is removed only if:
+  ///
+  /// - A disabled link exists for the sender
+  /// - The unlink ID matches the stored ID
+  ///
+  /// This prevents removing a link if:
+  ///
+  /// - The link was re-enabled
+  /// - A stale acknowledgment arrives
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-unlink-ack",
+      from = %self.from,
+      ulid = %self.ulid,
+    );
+
+    trace_enter!(&span);
+
+    match internal.links.entry(self.from) {
+      Entry::Occupied(entry) => {
+        if entry.get().is_disabled() {
+          if entry.get().matches(self.ulid) {
+            entry.remove();
+            trace_leave!(&span, "unlinked");
+          } else {
+            trace_leave!(&span, "ignored (stale)");
+          }
+        } else {
+          trace_leave!(&span, "ignored (enabled)");
+        }
+      }
+      Entry::Vacant(_) => {
+        trace_leave!(&span, "ignored (vacant)");
+      }
+    }
+
+    None
   }
 }
 
@@ -227,6 +542,43 @@ impl SignalMonitor {
   }
 }
 
+impl SignalEmit for SignalMonitor {
+  #[inline]
+  fn emit(self, to: &ProcReadOnly) {
+    to.send.send(Signal::Control(self.into()));
+  }
+}
+
+impl SignalRecv for SignalMonitor {
+  /// Establishes a monitor if one doesn't already exist for this reference.
+  ///
+  /// If a monitor with the same reference already exists, this signal is
+  /// ignored. Otherwise, monitor state is created.
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-monitor",
+      from = %self.from,
+      mref = %self.mref,
+      item = %self.item,
+    );
+
+    trace_enter!(&span);
+
+    match internal.monitor_recv.entry(self.mref) {
+      Entry::Occupied(_) => {
+        trace_leave!(&span, "ignored (occupied)");
+      }
+      Entry::Vacant(entry) => {
+        entry.insert(ProcMonitor::new(self.from, self.item));
+        trace_leave!(&span, "monitored");
+      }
+    }
+
+    None
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Signal - MonitorDown
 // -----------------------------------------------------------------------------
@@ -249,6 +601,51 @@ impl SignalMonitorDown {
   }
 }
 
+impl SignalEmit for SignalMonitorDown {
+  #[inline]
+  fn emit(self, to: &ProcReadOnly) {
+    to.send.send(Signal::Control(self.into()));
+  }
+}
+
+impl SignalRecv for SignalMonitorDown {
+  /// Delivers DOWN message and removes monitor state.
+  ///
+  /// If monitor state exists for the reference:
+  ///
+  /// 1. Sends DOWN message to the monitoring process
+  /// 2. Removes the monitor state
+  ///
+  /// Ignored if no monitor state exists (monitor was removed).
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-monitor-down",
+      from = %self.from,
+      mref = %self.mref,
+      exit = %self.exit,
+    );
+
+    trace_enter!(&span);
+
+    match internal.monitor_send.entry(self.mref) {
+      Entry::Occupied(entry) => {
+        let data: ProcMonitor = entry.remove();
+        let dest: LocalDest = data.target();
+
+        internal.send(DownMessage::new(self.mref, dest, self.exit));
+
+        trace_leave!(&span, "trapped");
+      }
+      Entry::Vacant(_) => {
+        trace_leave!(&span, "ignored (vacant)");
+      }
+    }
+
+    None
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Signal - Demonitor
 // -----------------------------------------------------------------------------
@@ -267,5 +664,40 @@ impl SignalDemonitor {
   #[inline]
   pub(crate) const fn new(from: LocalPid, mref: MonitorRef) -> Self {
     Self { from, mref }
+  }
+}
+
+impl SignalEmit for SignalDemonitor {
+  #[inline]
+  fn emit(self, to: &ProcReadOnly) {
+    to.send.send(Signal::Control(self.into()));
+  }
+}
+
+impl SignalRecv for SignalDemonitor {
+  /// Removes monitor state if it exists.
+  ///
+  /// Ignored if no monitor state exists for the reference.
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    let span: Span = trace_span!(
+      span,
+      "sig-demonitor",
+      from = %self.from,
+      mref = %self.mref,
+    );
+
+    trace_enter!(&span);
+
+    match internal.monitor_recv.entry(self.mref) {
+      Entry::Occupied(entry) => {
+        entry.remove();
+        trace_leave!(&span, "demonitored");
+      }
+      Entry::Vacant(_) => {
+        trace_leave!(&span, "ignored (vacant)");
+      }
+    }
+
+    None
   }
 }

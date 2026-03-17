@@ -1,5 +1,12 @@
+use tracing::Span;
+
+use crate::core::Exit;
 use crate::erts::ControlSignal;
 use crate::erts::MessageSignal;
+use crate::erts::ProcInternal;
+use crate::erts::ProcReadOnly;
+use crate::erts::SignalEmit;
+use crate::erts::SignalRecv;
 
 // -----------------------------------------------------------------------------
 // Signal
@@ -15,6 +22,26 @@ use crate::erts::MessageSignal;
 pub(crate) enum Signal {
   Control(ControlSignal),
   Message(MessageSignal),
+}
+
+impl SignalEmit for Signal {
+  #[inline]
+  fn emit(self, to: &ProcReadOnly) {
+    match self {
+      Self::Control(signal) => signal.emit(to),
+      Self::Message(signal) => signal.emit(to),
+    }
+  }
+}
+
+impl SignalRecv for Signal {
+  #[inline]
+  fn recv(self, span: &Span, readonly: &ProcReadOnly, internal: &mut ProcInternal) -> Option<Exit> {
+    match self {
+      Self::Control(signal) => signal.recv(span, readonly, internal),
+      Self::Message(signal) => signal.recv(span, readonly, internal),
+    }
+  }
 }
 
 impl From<ControlSignal> for Signal {

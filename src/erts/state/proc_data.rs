@@ -7,9 +7,11 @@ use tokio::task::JoinHandle;
 
 use crate::core::Atom;
 use crate::core::Exit;
+use crate::core::Item;
 use crate::core::LocalDest;
 use crate::core::LocalPid;
 use crate::core::MonitorRef;
+use crate::core::Term;
 use crate::erts::ProcDict;
 use crate::erts::ProcFlags;
 use crate::erts::ProcMail;
@@ -137,6 +139,16 @@ impl ProcInternal {
       dictionary: ProcDict::new(),
       group_leader: LocalPid::ROOT_PROC,
     }
+  }
+
+  /// Appends a message to the end of the process inbox. The caller must
+  /// ensure signal-ordering is preserved.
+  #[inline]
+  pub(crate) fn send<M>(&mut self, message: M)
+  where
+    M: Item,
+  {
+    self.inbox.push(Term::new(message));
   }
 }
 

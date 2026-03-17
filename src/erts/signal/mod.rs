@@ -9,6 +9,8 @@
 mod control;
 mod dynamic;
 mod message;
+mod trace;
+mod traits;
 
 pub(crate) use self::control::ControlSignal;
 pub(crate) use self::control::SignalDemonitor;
@@ -24,3 +26,10 @@ pub(crate) use self::dynamic::Signal;
 
 pub(crate) use self::message::MessageSignal;
 pub(crate) use self::message::SignalSend;
+
+pub(crate) use self::trace::trace_enter;
+pub(crate) use self::trace::trace_leave;
+pub(crate) use self::trace::trace_span;
+
+pub(crate) use self::traits::SignalEmit;
+pub(crate) use self::traits::SignalRecv;

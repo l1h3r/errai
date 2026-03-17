@@ -39,6 +39,13 @@ impl ProcMail {
       notify: Arc::new(Notify::new()),
     }
   }
+
+  /// Adds a message to the mailbox and wakes all waiters.
+  #[inline]
+  pub(crate) fn push(&mut self, message: Term) {
+    self.mqueue.push(message);
+    self.notify.notify_waiters();
+  }
 }
 
 impl Debug for ProcMail {

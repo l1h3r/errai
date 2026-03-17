@@ -6,7 +6,7 @@ use crate::core::LocalPid;
 /// EXIT messages appear in the mailbox only when the receiving process
 /// has the `trap_exit` flag enabled. Without this flag, EXIT signals
 /// cause the receiving process to terminate instead.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[repr(C)]
 pub struct ExitMessage {
   from: LocalPid,
