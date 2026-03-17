@@ -19,7 +19,9 @@ pub use self::table::MAX_ATOM_COUNT;
 
 pub use self::types::AliasRef;
 pub use self::types::Atom;
+pub use self::types::DownMessage;
 pub use self::types::Exit;
+pub use self::types::ExitMessage;
 pub use self::types::Item;
 pub use self::types::LocalDest;
 pub use self::types::LocalPid;
