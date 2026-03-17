@@ -2,7 +2,6 @@ use std::ops::Deref;
 use triomphe::Arc;
 
 use crate::erts::ProcData;
-use crate::erts::ProcInternal;
 
 /// Process task wrapper that triggers cleanup on drop.
 #[derive(Debug)]

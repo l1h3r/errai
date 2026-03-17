@@ -1,5 +1,4 @@
 use ptab::DefaultParams;
-use ptab::Detached;
 use ptab::PTab;
 use ptab::WeakKeys;
 use std::error::Error;

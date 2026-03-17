@@ -1,7 +1,5 @@
-use ptab::Capacity;
 use ptab::Detached;
 use ptab::config::DefaultParams;
-use ptab::config::ParamsExt;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
