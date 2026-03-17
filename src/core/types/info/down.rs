@@ -7,7 +7,7 @@ use crate::core::MonitorRef;
 /// DOWN messages are delivered to processes that have established a
 /// monitor on another process. They contain the monitor reference,
 /// the monitored destination, and the exit reason.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[repr(C)]
 pub struct DownMessage {
   mref: MonitorRef,
