@@ -1,5 +1,3 @@
-//! Runtime value types and identifiers.
-
 mod atom;
 mod dest;
 mod exit;
