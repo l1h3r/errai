@@ -55,12 +55,16 @@ unsafe impl Sync for ProcData {}
 pub(crate) struct ProcReadOnly {
   /// PID of the process.
   pub(crate) mpid: LocalPid,
+
   /// Sending side of the process signal queue.
   pub(crate) send: ProcSend,
+
   /// Process that spawned this one.
   pub(crate) root: Option<LocalPid>,
+
   /// Handle to the internal process task.
   pub(crate) task: OnceLock<JoinHandle<()>>,
+
   /// Process-unique identifier counter.
   pub(crate) puid: AtomicNzU64,
 }

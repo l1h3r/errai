@@ -13,6 +13,7 @@ pub(crate) use self::state::ProcMonitor;
 pub(crate) use self::state::ProcReadOnly;
 pub(crate) use self::state::ProcRecv;
 pub(crate) use self::state::ProcSend;
+pub(crate) use self::state::ProcTask;
 pub(crate) use self::state::unbounded_channel;
 
 pub(crate) struct Signal {}

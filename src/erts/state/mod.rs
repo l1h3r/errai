@@ -1,6 +1,7 @@
 mod proc_data;
 mod proc_dict;
 mod proc_flags;
+mod proc_task;
 mod sig_queue;
 
 pub(crate) use self::proc_data::ProcData;
@@ -13,6 +14,8 @@ pub(crate) use self::proc_data::ProcReadOnly;
 pub(crate) use self::proc_dict::ProcDict;
 
 pub(crate) use self::proc_flags::ProcFlags;
+
+pub(crate) use self::proc_task::ProcTask;
 
 pub(crate) use self::sig_queue::ProcMail;
 pub(crate) use self::sig_queue::ProcRecv;
