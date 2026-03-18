@@ -467,13 +467,13 @@ impl SignalRecv for SignalUnlinkAck {
 pub(crate) struct SignalMonitor {
   from: LocalPid,
   mref: MonitorRef,
-  item: LocalDest,
+  dest: LocalDest,
 }
 
 impl SignalMonitor {
   #[inline]
-  pub(crate) const fn new(from: LocalPid, mref: MonitorRef, item: LocalDest) -> Self {
-    Self { from, mref, item }
+  pub(crate) const fn new(from: LocalPid, mref: MonitorRef, dest: LocalDest) -> Self {
+    Self { from, mref, dest }
   }
 }
 
@@ -495,7 +495,7 @@ impl SignalRecv for SignalMonitor {
       "sig-monitor",
       from = %self.from,
       mref = %self.mref,
-      item = %self.item,
+      dest = %self.dest,
     );
 
     trace_enter!(&span);
@@ -505,7 +505,7 @@ impl SignalRecv for SignalMonitor {
         trace_leave!(&span, "ignored (occupied)");
       }
       Entry::Vacant(entry) => {
-        entry.insert(ProcMonitor::new(self.from, self.item));
+        entry.insert(ProcMonitor::new(self.from, self.dest));
         trace_leave!(&span, "monitored");
       }
     }
