@@ -64,16 +64,7 @@ pub(crate) enum ControlSignal {
 impl SignalEmit for ControlSignal {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    match self {
-      Self::Exit(signal) => signal.emit(to),
-      Self::Link(signal) => signal.emit(to),
-      Self::LinkExit(signal) => signal.emit(to),
-      Self::Unlink(signal) => signal.emit(to),
-      Self::UnlinkAck(signal) => signal.emit(to),
-      Self::Monitor(signal) => signal.emit(to),
-      Self::MonitorDown(signal) => signal.emit(to),
-      Self::Demonitor(signal) => signal.emit(to),
-    }
+    Signal::Control(self).emit(to)
   }
 }
 
@@ -90,62 +81,6 @@ impl SignalRecv for ControlSignal {
       Self::MonitorDown(signal) => signal.recv(span, readonly, internal),
       Self::Demonitor(signal) => signal.recv(span, readonly, internal),
     }
-  }
-}
-
-impl From<SignalExit> for ControlSignal {
-  #[inline]
-  fn from(other: SignalExit) -> Self {
-    Self::Exit(other)
-  }
-}
-
-impl From<SignalLink> for ControlSignal {
-  #[inline]
-  fn from(other: SignalLink) -> Self {
-    Self::Link(other)
-  }
-}
-
-impl From<SignalLinkExit> for ControlSignal {
-  #[inline]
-  fn from(other: SignalLinkExit) -> Self {
-    Self::LinkExit(other)
-  }
-}
-
-impl From<SignalUnlink> for ControlSignal {
-  #[inline]
-  fn from(other: SignalUnlink) -> Self {
-    Self::Unlink(other)
-  }
-}
-
-impl From<SignalUnlinkAck> for ControlSignal {
-  #[inline]
-  fn from(other: SignalUnlinkAck) -> Self {
-    Self::UnlinkAck(other)
-  }
-}
-
-impl From<SignalMonitor> for ControlSignal {
-  #[inline]
-  fn from(other: SignalMonitor) -> Self {
-    Self::Monitor(other)
-  }
-}
-
-impl From<SignalMonitorDown> for ControlSignal {
-  #[inline]
-  fn from(other: SignalMonitorDown) -> Self {
-    Self::MonitorDown(other)
-  }
-}
-
-impl From<SignalDemonitor> for ControlSignal {
-  #[inline]
-  fn from(other: SignalDemonitor) -> Self {
-    Self::Demonitor(other)
   }
 }
 
@@ -173,7 +108,7 @@ impl SignalExit {
 impl SignalEmit for SignalExit {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    to.send.send(Signal::Control(self.into()));
+    ControlSignal::Exit(self).emit(to)
   }
 }
 
@@ -258,7 +193,7 @@ impl SignalLink {
 impl SignalEmit for SignalLink {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    to.send.send(Signal::Control(self.into()));
+    ControlSignal::Link(self).emit(to)
   }
 }
 
@@ -314,7 +249,7 @@ impl SignalLinkExit {
 impl SignalEmit for SignalLinkExit {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    to.send.send(Signal::Control(self.into()));
+    ControlSignal::LinkExit(self).emit(to)
   }
 }
 
@@ -402,7 +337,7 @@ impl SignalUnlink {
 impl SignalEmit for SignalUnlink {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    to.send.send(Signal::Control(self.into()));
+    ControlSignal::Unlink(self).emit(to)
   }
 }
 
@@ -472,7 +407,7 @@ impl SignalUnlinkAck {
 impl SignalEmit for SignalUnlinkAck {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    to.send.send(Signal::Control(self.into()));
+    ControlSignal::UnlinkAck(self).emit(to)
   }
 }
 
@@ -545,7 +480,7 @@ impl SignalMonitor {
 impl SignalEmit for SignalMonitor {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    to.send.send(Signal::Control(self.into()));
+    ControlSignal::Monitor(self).emit(to)
   }
 }
 
@@ -604,7 +539,7 @@ impl SignalMonitorDown {
 impl SignalEmit for SignalMonitorDown {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    to.send.send(Signal::Control(self.into()));
+    ControlSignal::MonitorDown(self).emit(to)
   }
 }
 
@@ -670,7 +605,7 @@ impl SignalDemonitor {
 impl SignalEmit for SignalDemonitor {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    to.send.send(Signal::Control(self.into()));
+    ControlSignal::Demonitor(self).emit(to)
   }
 }
 

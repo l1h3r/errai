@@ -27,10 +27,7 @@ pub(crate) enum Signal {
 impl SignalEmit for Signal {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    match self {
-      Self::Control(signal) => signal.emit(to),
-      Self::Message(signal) => signal.emit(to),
-    }
+    to.send.send(self)
   }
 }
 
@@ -41,19 +38,5 @@ impl SignalRecv for Signal {
       Self::Control(signal) => signal.recv(span, readonly, internal),
       Self::Message(signal) => signal.recv(span, readonly, internal),
     }
-  }
-}
-
-impl From<ControlSignal> for Signal {
-  #[inline]
-  fn from(other: ControlSignal) -> Self {
-    Self::Control(other)
-  }
-}
-
-impl From<MessageSignal> for Signal {
-  #[inline]
-  fn from(other: MessageSignal) -> Self {
-    Self::Message(other)
   }
 }

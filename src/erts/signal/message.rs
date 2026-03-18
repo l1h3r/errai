@@ -25,9 +25,7 @@ pub(crate) enum MessageSignal {
 impl SignalEmit for MessageSignal {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    match self {
-      Self::Send(signal) => signal.emit(to),
-    }
+    Signal::Message(self).emit(to)
   }
 }
 
@@ -37,13 +35,6 @@ impl SignalRecv for MessageSignal {
     match self {
       Self::Send(signal) => signal.recv(span, readonly, internal),
     }
-  }
-}
-
-impl From<SignalSend> for MessageSignal {
-  #[inline]
-  fn from(other: SignalSend) -> Self {
-    Self::Send(other)
   }
 }
 
@@ -70,7 +61,7 @@ impl SignalSend {
 impl SignalEmit for SignalSend {
   #[inline]
   fn emit(self, to: &ProcReadOnly) {
-    to.send.send(Signal::Message(self.into()));
+    MessageSignal::Send(self).emit(to)
   }
 }
 
