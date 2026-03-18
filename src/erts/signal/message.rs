@@ -83,7 +83,7 @@ impl SignalRecv for SignalSend {
 
     trace_enter!(&span);
 
-    internal.inbox.push(self.data);
+    internal.enqueue(self.data.into_inner());
 
     trace_leave!(&span, "enqueue");
 

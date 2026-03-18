@@ -218,7 +218,7 @@ impl ProcInternal {
   /// Appends a message to the end of the process inbox. The caller must
   /// ensure signal-ordering is preserved.
   #[inline]
-  pub(crate) fn send<M>(&mut self, message: M)
+  pub(crate) fn enqueue<M>(&mut self, message: M)
   where
     M: Item,
   {

@@ -6,6 +6,26 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result;
 
+macro_rules! boxed_trait_object {
+  (impl boxed $trait:ident { $($tt:tt)* }) => {
+    impl $trait for Box<dyn $trait> {
+      $($tt)*
+    }
+
+    impl $trait for Box<dyn $trait + Send> {
+      $($tt)*
+    }
+
+    impl $trait for Box<dyn $trait + Sync> {
+      $($tt)*
+    }
+
+    impl $trait for Box<dyn $trait + Send + Sync> {
+      $($tt)*
+    }
+  };
+}
+
 // -----------------------------------------------------------------------------
 // Item
 // -----------------------------------------------------------------------------
@@ -42,6 +62,14 @@ pub trait Item: Any + Debug + DynClone + Send + Sync + 'static {
   ///
   /// This is stricter than [`PartialEq`] because the types must be identical.
   fn dyn_eq(&self, other: &dyn Item) -> bool;
+
+  #[inline]
+  fn boxed(self) -> Box<dyn Item>
+  where
+    Self: Sized,
+  {
+    Box::new(self)
+  }
 }
 
 clone_trait_object!(Item);
@@ -56,6 +84,20 @@ where
     (other as &dyn Any)
       .downcast_ref::<T>()
       .is_some_and(|other| self == other)
+  }
+}
+
+boxed_trait_object! {
+  impl boxed Item {
+    #[inline]
+    fn dyn_eq(&self, other: &dyn Item) -> bool {
+      (**self).dyn_eq(other)
+    }
+
+    #[inline]
+    fn boxed(self) -> Box<dyn Item> {
+      self
+    }
   }
 }
 
@@ -110,7 +152,7 @@ impl Term {
     T: Item,
   {
     Self {
-      data: Box::new(data),
+      data: T::boxed(data),
     }
   }
 
@@ -231,6 +273,11 @@ impl Term {
         None => Self::new(Self::fallback_error(error)),
       },
     }
+  }
+
+  #[inline]
+  pub(crate) fn into_inner(self) -> Box<dyn Item + Send + Sync> {
+    self.data
   }
 
   #[cold]

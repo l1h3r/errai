@@ -142,7 +142,7 @@ impl SignalRecv for SignalExit {
     match self.exit {
       Exit::Atom(atom) if atom == Atom::NORMAL => {
         if internal.flags.contains(ProcFlags::TRAP_EXIT) {
-          internal.send(ExitMessage::new(self.from, self.exit));
+          internal.enqueue(ExitMessage::new(self.from, self.exit));
           trace_leave!(&span, "trapped");
         } else if self.from == readonly.mpid {
           trace_leave!(&span, "self-destruct");
@@ -157,7 +157,7 @@ impl SignalRecv for SignalExit {
       }
       Exit::Atom(_) | Exit::Term(_) => {
         if internal.flags.contains(ProcFlags::TRAP_EXIT) {
-          internal.send(ExitMessage::new(self.from, self.exit));
+          internal.enqueue(ExitMessage::new(self.from, self.exit));
           trace_leave!(&span, "trapped");
         } else {
           trace_leave!(&span, "terminated (custom)");
@@ -283,7 +283,7 @@ impl SignalRecv for SignalLinkExit {
       Entry::Occupied(entry) => {
         if entry.get().is_enabled() {
           if internal.flags.contains(ProcFlags::TRAP_EXIT) {
-            internal.send(ExitMessage::new(self.from, self.exit));
+            internal.enqueue(ExitMessage::new(self.from, self.exit));
             trace_leave!(&span, "trapped");
           } else {
             match self.exit {
@@ -568,7 +568,7 @@ impl SignalRecv for SignalMonitorDown {
         let data: ProcMonitor = entry.remove();
         let dest: LocalDest = data.target();
 
-        internal.send(DownMessage::new(self.mref, dest, self.exit));
+        internal.enqueue(DownMessage::new(self.mref, dest, self.exit));
 
         trace_leave!(&span, "trapped");
       }
