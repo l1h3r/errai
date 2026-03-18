@@ -16,16 +16,16 @@ use crate::erts::ProcDict;
 use crate::erts::ProcFlags;
 use crate::erts::ProcMail;
 use crate::erts::ProcSend;
-use crate::erts::SignalSend;
+use crate::erts::SignalDemonitor;
 use crate::erts::SignalEmit;
 use crate::erts::SignalExit;
 use crate::erts::SignalLink;
 use crate::erts::SignalLinkExit;
-use crate::erts::SignalUnlink;
-use crate::erts::SignalUnlinkAck;
 use crate::erts::SignalMonitor;
 use crate::erts::SignalMonitorDown;
-use crate::erts::SignalDemonitor;
+use crate::erts::SignalSend;
+use crate::erts::SignalUnlink;
+use crate::erts::SignalUnlinkAck;
 use crate::utils::atomic::AtomicNzU64;
 
 // -----------------------------------------------------------------------------
