@@ -16,6 +16,16 @@ use crate::erts::ProcDict;
 use crate::erts::ProcFlags;
 use crate::erts::ProcMail;
 use crate::erts::ProcSend;
+use crate::erts::SignalDemonitor;
+use crate::erts::SignalEmit;
+use crate::erts::SignalExit;
+use crate::erts::SignalLink;
+use crate::erts::SignalLinkExit;
+use crate::erts::SignalMonitor;
+use crate::erts::SignalMonitorDown;
+use crate::erts::SignalSend;
+use crate::erts::SignalUnlink;
+use crate::erts::SignalUnlinkAck;
 use crate::utils::atomic::AtomicNzU64;
 
 // -----------------------------------------------------------------------------
@@ -86,6 +96,70 @@ impl ProcReadOnly {
       puid: AtomicNzU64::default(),
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Signals
+  // ---------------------------------------------------------------------------
+
+  /// Sends a message signal to this process.
+  #[inline]
+  pub(crate) fn send_message<T>(&self, from: LocalPid, data: T)
+  where
+    T: Into<Term>,
+  {
+    SignalSend::new(from, data.into()).emit(self);
+  }
+
+  /// Sends an exit signal to this process.
+  #[inline]
+  pub(crate) fn send_exit(&self, from: LocalPid, exit: Exit) {
+    SignalExit::new(from, exit).emit(self);
+  }
+
+  /// Sends a link signal to this process.
+  #[inline]
+  pub(crate) fn send_link(&self, from: LocalPid) {
+    SignalLink::new(from).emit(self);
+  }
+
+  /// Sends a link-exit signal to this process.
+  #[inline]
+  pub(crate) fn send_link_exit(&self, from: LocalPid, exit: Exit) {
+    SignalLinkExit::new(from, exit).emit(self);
+  }
+
+  /// Sends an unlink signal to this process.
+  #[inline]
+  pub(crate) fn send_unlink(&self, from: LocalPid, ulid: NonZeroU64) {
+    SignalUnlink::new(from, ulid).emit(self);
+  }
+
+  /// Sends an unlink acknowledgment signal to this process.
+  #[inline]
+  pub(crate) fn send_unlink_ack(&self, from: LocalPid, ulid: NonZeroU64) {
+    SignalUnlinkAck::new(from, ulid).emit(self);
+  }
+
+  /// Sends a monitor signal to this process.
+  #[inline]
+  pub(crate) fn send_monitor<T>(&self, from: LocalPid, mref: MonitorRef, dest: T)
+  where
+    T: Into<LocalDest>,
+  {
+    SignalMonitor::new(from, mref, dest.into()).emit(self);
+  }
+
+  /// Sends a monitor-down signal to this process.
+  #[inline]
+  pub(crate) fn send_monitor_down(&self, from: LocalPid, mref: MonitorRef, exit: Exit) {
+    SignalMonitorDown::new(from, mref, exit).emit(self);
+  }
+
+  /// Sends a demonitor signal to this process.
+  #[inline]
+  pub(crate) fn send_demonitor(&self, from: LocalPid, mref: MonitorRef) {
+    SignalDemonitor::new(from, mref).emit(self);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -144,7 +218,7 @@ impl ProcInternal {
   /// Appends a message to the end of the process inbox. The caller must
   /// ensure signal-ordering is preserved.
   #[inline]
-  pub(crate) fn send<M>(&mut self, message: M)
+  pub(crate) fn enqueue<M>(&mut self, message: M)
   where
     M: Item,
   {
