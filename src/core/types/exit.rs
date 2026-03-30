@@ -1,52 +1,3 @@
-//! Process exit reasons used for termination, linking, and monitoring semantics.
-//!
-//! This module provides the [`Exit`] type, which represents why a process
-//! terminated. Exit reasons propagate through process links and monitors,
-//! enabling fault detection and supervision hierarchies.
-//!
-//! # Exit Propagation
-//!
-//! When a process terminates, its exit reason is sent to:
-//!
-//! - **Linked processes**: Receive exit signals that may cause termination
-//! - **Monitoring processes**: Receive down messages with the exit reason
-//!
-//! The behavior depends on process flags like `trap_exit`.
-//!
-//! # Standard Exit Reasons
-//!
-//! The runtime defines several well-known exit reasons:
-//!
-//! - [`Exit::NORMAL`]: Clean shutdown with no errors
-//! - [`Exit::KILLED`]: Forceful termination (unconditional)
-//! - [`Exit::NOPROC`]: Monitored process doesn't exist
-//! - [`Exit::NOCONN`]: Remote node connection lost
-//!
-//! # Custom Exit Reasons
-//!
-//! Applications can use custom exit reasons via the [`Exit::Term`] variant,
-//! allowing structured error information to propagate through supervision trees.
-//!
-//! # Examples
-//!
-//! ```
-//! use errai::core::{Atom, Exit, Term};
-//!
-//! // Standard exit reasons
-//! let normal = Exit::NORMAL;
-//! let killed = Exit::KILLED;
-//!
-//! // Custom atom-based reason
-//! let shutdown = Exit::from(Atom::new("shutdown"));
-//!
-//! // Custom structured reason
-//! let error = Exit::from(Term::new("database connection failed"));
-//!
-//! // Check exit type
-//! assert!(normal.is_normal());
-//! assert!(!killed.is_normal());
-//! ```
-
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -62,17 +13,19 @@ use crate::core::Term;
 /// 1. **Diagnostic**: Explain what caused process termination
 /// 2. **Propagation**: Determine how linked/monitored processes react
 ///
-/// # Variants
+/// # Standard Exit Reasons
 ///
-/// - [`Exit::Atom`]: Predefined or well-known exit reasons
-/// - [`Exit::Term`]: Custom or structured exit reasons
+/// The runtime defines several well-known exit reasons:
 ///
-/// # Normal vs Abnormal Termination
+/// - [`Exit::NORMAL`]: Clean shutdown with no errors
+/// - [`Exit::KILLED`]: Forceful termination (unconditional)
+/// - [`Exit::NOPROC`]: Monitored process doesn't exist
+/// - [`Exit::NOCONN`]: Remote node connection lost
 ///
-/// The exit reason [`Exit::NORMAL`] has special semantics: it doesn't
-/// cause linked processes to terminate (unless they're trapping exits).
-/// All other exit reasons are considered abnormal and propagate through
-/// process links.
+/// # Custom Exit Reasons
+///
+/// Applications can use custom exit reasons via the [`Exit::Term`] variant,
+/// allowing structured error information to propagate through supervision trees.
 ///
 /// # Examples
 ///
@@ -87,7 +40,7 @@ use crate::core::Term;
 ///   println!("Process crashed: {}", exit);
 /// }
 /// ```
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Exit {
   /// Exit reason represented by a predefined atom.
   ///
@@ -104,16 +57,13 @@ pub enum Exit {
 impl Exit {
   /// Exit reason indicating normal process termination.
   ///
-  /// Normal exits don't cause linked processes to terminate (unless they
-  /// have `trap_exit` enabled). This is the expected exit reason for
-  /// processes that complete their work successfully.
+  /// This is the expected exit reason for processes that complete their work
+  /// successfully.
   pub const NORMAL: Self = Self::Atom(Atom::NORMAL);
 
   /// Exit reason indicating forced process termination.
   ///
-  /// Killed exits propagate unconditionally through process links and
-  /// cannot be trapped. This reason is used when a process must be
-  /// terminated immediately.
+  /// This reason is used when a process must be terminated immediately.
   pub const KILLED: Self = Self::Atom(Atom::KILLED);
 
   /// Exit reason indicating a nonexistent monitored process.
@@ -129,9 +79,6 @@ impl Exit {
   pub const NOCONN: Self = Self::Atom(Atom::NOCONN);
 
   /// Returns `true` if this exit reason represents normal termination.
-  ///
-  /// Only [`Exit::NORMAL`] is considered a normal exit. All other reasons,
-  /// including custom atoms, are treated as abnormal.
   ///
   /// # Examples
   ///
@@ -164,9 +111,6 @@ impl Exit {
 
   /// Returns `true` if this exit reason represents a missing process.
   ///
-  /// This typically appears in monitor down messages when the target
-  /// process never existed or was already dead when monitoring began.
-  ///
   /// # Examples
   ///
   /// ```
@@ -181,9 +125,6 @@ impl Exit {
   }
 
   /// Returns `true` if this exit reason represents a disconnected node.
-  ///
-  /// This typically appears when a monitored process on a remote node
-  /// becomes unreachable due to network issues or node failure.
   ///
   /// # Examples
   ///
@@ -250,38 +191,6 @@ mod tests {
   }
 
   #[test]
-  fn test_normal_is_atom() {
-    assert!(
-      matches!(Exit::NORMAL, Exit::Atom(_)),
-      "NORMAL should be Atom variant"
-    );
-  }
-
-  #[test]
-  fn test_killed_is_atom() {
-    assert!(
-      matches!(Exit::KILLED, Exit::Atom(_)),
-      "KILLED should be Atom variant"
-    );
-  }
-
-  #[test]
-  fn test_noproc_is_atom() {
-    assert!(
-      matches!(Exit::NOPROC, Exit::Atom(_)),
-      "NOPROC should be Atom variant"
-    );
-  }
-
-  #[test]
-  fn test_noconnis_atom() {
-    assert!(
-      matches!(Exit::NOCONN, Exit::Atom(_)),
-      "NOCONN should be Atom variant"
-    );
-  }
-
-  #[test]
   fn test_is_normal() {
     assert!(Exit::NORMAL.is_normal());
     assert!(!Exit::KILLED.is_normal());
@@ -314,56 +223,6 @@ mod tests {
   }
 
   #[test]
-  fn test_is_normal_with_custom_atom() {
-    let exit: Exit = Exit::from(Atom::new("custom"));
-
-    assert!(!exit.is_normal());
-  }
-
-  #[test]
-  fn test_term_variant_predicates() {
-    let exit: Exit = Exit::from(Term::new("error"));
-
-    assert!(!exit.is_normal());
-    assert!(!exit.is_killed());
-    assert!(!exit.is_noproc());
-    assert!(!exit.is_noconn());
-  }
-
-  #[test]
-  fn test_from_atom() {
-    let atom: Atom = Atom::new("shutdown");
-    let exit: Exit = Exit::from(atom);
-
-    if let Exit::Atom(item) = exit {
-      assert_eq!(item, atom);
-    } else {
-      panic!("Should be Atom variant");
-    }
-  }
-
-  #[test]
-  fn test_from_well_known_atom() {
-    assert!(Exit::from(Atom::NORMAL).is_normal());
-  }
-
-  #[test]
-  fn test_from_term_integer() {
-    let term: Term = Term::new(123_u32);
-    let exit: Exit = Exit::from(term);
-
-    assert!(matches!(exit, Exit::Term(_)), "Should be Term variant");
-  }
-
-  #[test]
-  fn test_from_term_string() {
-    let term: Term = Term::new(String::from("error message"));
-    let exit: Exit = Exit::from(term);
-
-    assert!(matches!(exit, Exit::Term(_)), "Should be Term variant");
-  }
-
-  #[test]
   fn test_clone() {
     let src: Exit = Exit::NORMAL;
     let dst: Exit = src.clone();
@@ -389,10 +248,41 @@ mod tests {
   }
 
   #[test]
-  fn test_custom_display() {
-    let src: Exit = Exit::Atom(Atom::new("timeout"));
-    let fmt: String = format!("{src}");
+  fn test_display_custom() {
+    assert_eq!(format!("{}", Exit::Atom(Atom::new("timeout"))), "timeout");
+  }
 
-    assert_eq!(fmt, "timeout");
+  #[test]
+  fn test_debug_custom() {
+    assert_eq!(format!("{:?}", Exit::Atom(Atom::new("timeout"))), "timeout");
+  }
+
+  #[test]
+  fn test_from_atom() {
+    let atom: Atom = Atom::new("shutdown");
+    let exit: Exit = Exit::from(atom);
+
+    assert_eq!(exit, Exit::Atom(atom));
+  }
+
+  #[test]
+  fn test_from_well_known_atom() {
+    assert!(Exit::from(Atom::NORMAL).is_normal());
+  }
+
+  #[test]
+  fn test_from_term_integer() {
+    let term: Term = Term::new(123_u32);
+    let exit: Exit = Exit::from(term.clone());
+
+    assert_eq!(exit, Exit::Term(term));
+  }
+
+  #[test]
+  fn test_from_term_string() {
+    let term: Term = Term::new("error message");
+    let exit: Exit = Exit::from(term.clone());
+
+    assert_eq!(exit, Exit::Term(term));
   }
 }

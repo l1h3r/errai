@@ -1,94 +1,56 @@
-//! Atom type providing efficient, interned, immutable string identifiers.
-//!
-//! This module provides the [`Atom`] type, a lightweight handle to globally
-//! interned strings. Atoms enable fast equality comparisons and efficient
-//! memory usage for frequently used string values.
-//!
-//! # Core Properties
-//!
-//! - **Interned**: Each unique string is stored exactly once
-//! - **Immutable**: Atom values cannot be changed after creation
-//! - **Fast comparison**: Equality checks compare 32-bit slot indices
-//! - **Zero-copy**: Converting to string slices requires no allocation
-//!
-//! # Well-Known Atoms
-//!
-//! The runtime pre-allocates several atoms for common values:
-//!
-//! - [`Atom::EMPTY`]: The empty string `""`
-//! - [`Atom::NORMAL`]: Process exit reason `"normal"`
-//! - [`Atom::KILL`]: Unconditional kill signal `"kill"`
-//! - [`Atom::KILLED`]: Killed exit reason `"killed"`
-//! - [`Atom::NOPROC`]: No such process error `"noproc"`
-//! - [`Atom::NOCONN`]: No connection error `"noconn"`
-//! - [`Atom::UNDEFINED`]: Undefined value `"undefined"`
-//!
-//! # Examples
-//!
-//! ```
-//! use errai::core::Atom;
-//!
-//! // Create atoms from strings
-//! let hello = Atom::new("hello");
-//! let world = Atom::from("world");
-//!
-//! // Fast equality (compares slot indices, not strings)
-//! assert_eq!(Atom::new("test"), Atom::new("test"));
-//!
-//! // Access string value
-//! assert_eq!(hello.as_str(), "hello");
-//!
-//! // Use well-known atoms
-//! assert_eq!(Atom::NORMAL, "normal");
-//! ```
-//!
-//! # Performance Characteristics
-//!
-//! - **Creation**: O(1) for existing atoms, O(n) for new atoms
-//! - **Equality**: O(1) integer comparison
-//! - **Ordering**: O(n) string comparison (delegates to underlying string)
-//! - **Memory**: 4 bytes per [`Atom`] instance
-
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
 use std::ops::Deref;
 use std::path::Path;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
 use crate::core::AtomTable;
-use crate::raise;
+use crate::core::fatal;
+use crate::core::raise;
 
 // -----------------------------------------------------------------------------
-// Atom Table
+// Global Atom Table
 // -----------------------------------------------------------------------------
+
+macro_rules! insert_well_known {
+  ($table:expr, $value:literal, Atom::$expected:ident) => {{
+    let valid: bool = $table
+      .insert($value)
+      .map(|slot| slot == Atom::$expected.into_slot())
+      .unwrap_or_else(|error| fatal!(error));
+
+    if !valid {
+      fatal!("invalid well-known atom")
+    }
+  }};
+}
 
 /// Global atom table initialized with well-known runtime atoms.
 ///
 /// This table is lazily initialized on first access and ensures well-known
 /// atoms occupy their expected slot indices.
 static ATOM_TABLE: LazyLock<AtomTable> = LazyLock::new(|| {
-  // Initialize predefined atoms. Panic on failure is acceptable here
-  // because failure to initialize the atom table is fatal.
-
   let table: AtomTable = AtomTable::new();
 
-  assert_eq!(table.set("").unwrap(), Atom::EMPTY.into_slot());
+  insert_well_known!(table, "", Atom::EMPTY);
 
-  assert_eq!(table.set("kill").unwrap(), Atom::KILL.into_slot());
-  assert_eq!(table.set("killed").unwrap(), Atom::KILLED.into_slot());
-  assert_eq!(table.set("normal").unwrap(), Atom::NORMAL.into_slot());
+  insert_well_known!(table, "kill", Atom::KILL);
+  insert_well_known!(table, "killed", Atom::KILLED);
+  insert_well_known!(table, "normal", Atom::NORMAL);
 
-  assert_eq!(table.set("noproc").unwrap(), Atom::NOPROC.into_slot());
-  assert_eq!(table.set("noconn").unwrap(), Atom::NOCONN.into_slot());
+  insert_well_known!(table, "noproc", Atom::NOPROC);
+  insert_well_known!(table, "noconn", Atom::NOCONN);
 
-  assert_eq!(table.set("undefined").unwrap(), Atom::UNDEFINED.into_slot());
+  insert_well_known!(table, "undefined", Atom::UNDEFINED);
 
   table
 });
@@ -102,17 +64,6 @@ static ATOM_TABLE: LazyLock<AtomTable> = LazyLock::new(|| {
 /// Atoms are lightweight handles (32-bit slot indices) to globally interned
 /// strings. They provide fast equality comparisons and efficient memory usage
 /// for string values that appear multiple times in the system.
-///
-/// # Memory Layout
-///
-/// [`Atom`] is a transparent wrapper around a `u32` slot index:
-///
-/// ```text
-/// Atom { slot: u32 }  // 4 bytes
-/// ```
-///
-/// The actual string data lives in the global atom table and is shared
-/// across all [`Atom`] instances with the same value.
 ///
 /// # Equality and Ordering
 ///
@@ -141,46 +92,22 @@ impl Atom {
   pub const EMPTY: Self = Self::from_slot(0);
 
   /// Atom representing the value `kill`.
-  ///
-  /// Used for unconditional process termination signals.
   pub const KILL: Self = Self::from_slot(1);
 
   /// Atom representing the value `killed`.
-  ///
-  /// Used as an exit reason when a process is killed.
   pub const KILLED: Self = Self::from_slot(2);
 
   /// Atom representing the value `normal`.
-  ///
-  /// Used as an exit reason for normal process termination.
   pub const NORMAL: Self = Self::from_slot(3);
 
   /// Atom representing the value `noproc`.
-  ///
-  /// Used to indicate that a referenced process does not exist.
   pub const NOPROC: Self = Self::from_slot(4);
 
   /// Atom representing the value `noconn`.
-  ///
-  /// Used to indicate that a connection to a remote node does not exist.
   pub const NOCONN: Self = Self::from_slot(5);
 
   /// Atom representing the value `undefined`.
-  ///
-  /// Used to represent undefined or uninitialized values.
   pub const UNDEFINED: Self = Self::from_slot(6);
-
-  /// Constructs an atom from a raw atom table slot.
-  #[inline]
-  pub(crate) const fn from_slot(slot: u32) -> Self {
-    Self { slot }
-  }
-
-  /// Returns the atom table slot backing this atom.
-  #[inline]
-  pub(crate) const fn into_slot(self) -> u32 {
-    self.slot
-  }
 
   /// Interns a string and returns its corresponding atom.
   ///
@@ -203,11 +130,11 @@ impl Atom {
   /// assert_eq!(atom1, atom2); // Same string, same atom
   /// ```
   ///
-  /// [`MAX_ATOM_BYTES`]: crate::consts::MAX_ATOM_BYTES
-  /// [`MAX_ATOM_COUNT`]: crate::consts::MAX_ATOM_COUNT
+  /// [`MAX_ATOM_BYTES`]: crate::core::MAX_ATOM_BYTES
+  /// [`MAX_ATOM_COUNT`]: crate::core::MAX_ATOM_COUNT
   #[inline]
   pub fn new(data: &str) -> Self {
-    match ATOM_TABLE.set(data) {
+    match ATOM_TABLE.insert(data) {
       Ok(slot) => Self::from_slot(slot),
       Err(error) => raise!(Error, SysCap, error),
     }
@@ -217,11 +144,6 @@ impl Atom {
   ///
   /// This operation is zero-copy and returns a reference to the interned
   /// string with a `'static` lifetime.
-  ///
-  /// # Panics
-  ///
-  /// Panics if the atom's slot index is invalid. This should never occur
-  /// with atoms constructed through the public API.
   ///
   /// # Examples
   ///
@@ -233,10 +155,22 @@ impl Atom {
   /// ```
   #[inline]
   pub fn as_str(&self) -> &'static str {
-    match ATOM_TABLE.get(self.slot) {
+    match ATOM_TABLE.lookup(self.slot) {
       Ok(data) => data,
-      Err(error) => raise!(Error, SysInv, error),
+      Err(error) => fatal!(error),
     }
+  }
+
+  /// Constructs an atom from a raw atom table slot.
+  #[inline]
+  pub(crate) const fn from_slot(slot: u32) -> Self {
+    Self { slot }
+  }
+
+  /// Returns the atom table slot backing this atom.
+  #[inline]
+  pub(crate) const fn into_slot(self) -> u32 {
+    self.slot
   }
 }
 
@@ -267,6 +201,7 @@ impl PartialOrd for Atom {
 }
 
 impl Ord for Atom {
+  #[inline]
   fn cmp(&self, other: &Self) -> Ordering {
     Ord::cmp(self.as_str(), other.as_str())
   }
@@ -317,6 +252,13 @@ impl From<&String> for Atom {
   }
 }
 
+impl From<Cow<'_, str>> for Atom {
+  #[inline]
+  fn from(other: Cow<'_, str>) -> Atom {
+    Atom::new(other.as_ref())
+  }
+}
+
 impl From<Box<str>> for Atom {
   #[inline]
   fn from(other: Box<str>) -> Atom {
@@ -325,6 +267,7 @@ impl From<Box<str>> for Atom {
 }
 
 impl From<Rc<str>> for Atom {
+  #[inline]
   fn from(other: Rc<str>) -> Atom {
     Atom::new(other.as_ref())
   }
@@ -333,12 +276,6 @@ impl From<Rc<str>> for Atom {
 impl From<Arc<str>> for Atom {
   #[inline]
   fn from(other: Arc<str>) -> Atom {
-    Atom::new(other.as_ref())
-  }
-}
-
-impl From<Cow<'_, str>> for Atom {
-  fn from(other: Cow<'_, str>) -> Atom {
     Atom::new(other.as_ref())
   }
 }
@@ -354,6 +291,13 @@ impl From<Atom> for String {
   #[inline]
   fn from(other: Atom) -> Self {
     String::from(other.as_str())
+  }
+}
+
+impl From<Atom> for Cow<'static, str> {
+  #[inline]
+  fn from(other: Atom) -> Self {
+    Cow::Borrowed(other.as_str())
   }
 }
 
@@ -378,16 +322,44 @@ impl From<Atom> for Arc<str> {
   }
 }
 
-impl From<Atom> for Cow<'static, str> {
-  #[inline]
-  fn from(other: Atom) -> Self {
-    Cow::Borrowed(other.as_str())
-  }
-}
-
 // -----------------------------------------------------------------------------
 // Extensions - PartialEq
 // -----------------------------------------------------------------------------
+
+macro_rules! impl_partial_eq {
+  ($type:ty, $convert_that:path) => {
+    impl_partial_eq!($type, Atom::as_str, $convert_that);
+  };
+  ($type:ty, $convert_atom:path, $convert_that:path) => {
+    impl PartialEq<$type> for Atom {
+      #[inline]
+      fn eq(&self, other: &$type) -> bool {
+        $convert_atom(self) == $convert_that(other)
+      }
+    }
+
+    impl PartialEq<&$type> for Atom {
+      #[inline]
+      fn eq(&self, other: &&$type) -> bool {
+        $convert_atom(self) == $convert_that(other)
+      }
+    }
+
+    impl PartialEq<Atom> for $type {
+      #[inline]
+      fn eq(&self, other: &Atom) -> bool {
+        $convert_that(self) == $convert_atom(other)
+      }
+    }
+
+    impl PartialEq<Atom> for &$type {
+      #[inline]
+      fn eq(&self, other: &Atom) -> bool {
+        $convert_that(self) == $convert_atom(other)
+      }
+    }
+  };
+}
 
 impl PartialEq<str> for Atom {
   #[inline]
@@ -403,66 +375,10 @@ impl PartialEq<Atom> for str {
   }
 }
 
-impl PartialEq<Cow<'_, str>> for Atom {
-  #[inline]
-  fn eq(&self, other: &Cow<'_, str>) -> bool {
-    self.as_str() == other.as_ref()
-  }
-}
-
 impl PartialEq<&str> for Atom {
   #[inline]
   fn eq(&self, other: &&str) -> bool {
     self.as_str() == *other
-  }
-}
-
-impl PartialEq<&&str> for Atom {
-  #[inline]
-  fn eq(&self, other: &&&str) -> bool {
-    self.as_str() == **other
-  }
-}
-
-impl PartialEq<String> for Atom {
-  #[inline]
-  fn eq(&self, other: &String) -> bool {
-    self.as_str() == other
-  }
-}
-
-impl PartialEq<&String> for Atom {
-  #[inline]
-  fn eq(&self, other: &&String) -> bool {
-    self.as_str() == *other
-  }
-}
-
-impl PartialEq<Box<str>> for Atom {
-  #[inline]
-  fn eq(&self, other: &Box<str>) -> bool {
-    self.as_str() == other.as_ref()
-  }
-}
-
-impl PartialEq<Rc<str>> for Atom {
-  #[inline]
-  fn eq(&self, other: &Rc<str>) -> bool {
-    self.as_str() == other.as_ref()
-  }
-}
-
-impl PartialEq<Arc<str>> for Atom {
-  #[inline]
-  fn eq(&self, other: &Arc<str>) -> bool {
-    self.as_str() == other.as_ref()
-  }
-}
-
-impl PartialEq<&Cow<'_, str>> for Atom {
-  #[inline]
-  fn eq(&self, other: &&Cow<'_, str>) -> bool {
-    self.as_str() == other.as_ref()
   }
 }
 
@@ -473,6 +389,13 @@ impl PartialEq<Atom> for &str {
   }
 }
 
+impl PartialEq<&&str> for Atom {
+  #[inline]
+  fn eq(&self, other: &&&str) -> bool {
+    self.as_str() == **other
+  }
+}
+
 impl PartialEq<Atom> for &&str {
   #[inline]
   fn eq(&self, other: &Atom) -> bool {
@@ -480,101 +403,39 @@ impl PartialEq<Atom> for &&str {
   }
 }
 
-impl PartialEq<Atom> for String {
+impl_partial_eq!(String, String::as_str);
+
+impl_partial_eq!(Cow<'_, str>, AsRef::as_ref);
+
+impl_partial_eq!(Box<str>, AsRef::as_ref);
+impl_partial_eq!(Rc<str>, AsRef::as_ref);
+impl_partial_eq!(Arc<str>, AsRef::as_ref);
+
+impl_partial_eq!(Path, Path::as_os_str);
+impl_partial_eq!(PathBuf, Path::as_os_str);
+
+impl_partial_eq!(OsStr, OsStr::new, OsStrExt::as_os_str);
+impl_partial_eq!(OsString, OsString::as_os_str);
+
+// TODO: Replace this trait with `OsStr::as_os_str` once `str_as_str` is stable.
+//
+// https://doc.rust-lang.org/nightly/std/ffi/os_str/struct.OsStr.html#method.as_os_str
+// https://github.com/rust-lang/rust/issues/130366
+trait OsStrExt {
+  fn as_os_str(&self) -> &OsStr;
+}
+
+impl OsStrExt for OsStr {
   #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self == other.as_str()
+  fn as_os_str(&self) -> &OsStr {
+    self
   }
 }
 
-impl PartialEq<Atom> for &String {
+impl OsStrExt for &OsStr {
   #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    *self == other.as_str()
-  }
-}
-
-impl PartialEq<Atom> for Box<str> {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self.as_ref() == other.as_str()
-  }
-}
-
-impl PartialEq<Atom> for &Box<str> {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self.as_ref() == other.as_str()
-  }
-}
-
-impl PartialEq<Atom> for Rc<str> {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self.as_ref() == other.as_str()
-  }
-}
-
-impl PartialEq<Atom> for &Rc<str> {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self.as_ref() == other.as_str()
-  }
-}
-
-impl PartialEq<Atom> for Arc<str> {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self.as_ref() == other.as_str()
-  }
-}
-
-impl PartialEq<Atom> for &Arc<str> {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self.as_ref() == other.as_str()
-  }
-}
-
-impl PartialEq<Atom> for Cow<'_, str> {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self.as_ref() == other.as_str()
-  }
-}
-
-impl PartialEq<Atom> for &Cow<'_, str> {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self.as_ref() == other.as_str()
-  }
-}
-
-impl PartialEq<Atom> for Path {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self == Path::new(other)
-  }
-}
-
-impl PartialEq<Atom> for &Path {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    *self == Path::new(other)
-  }
-}
-
-impl PartialEq<Atom> for OsStr {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    self == OsStr::new(other)
-  }
-}
-
-impl PartialEq<Atom> for &OsStr {
-  #[inline]
-  fn eq(&self, other: &Atom) -> bool {
-    *self == OsStr::new(other)
+  fn as_os_str(&self) -> &OsStr {
+    self
   }
 }
 
@@ -584,44 +445,62 @@ impl PartialEq<Atom> for &OsStr {
 
 #[cfg(test)]
 mod tests {
-  use hashbrown::HashSet;
+  use std::borrow::Cow;
+  use std::collections::HashSet;
+  use std::ffi::OsStr;
+  use std::ffi::OsString;
+  use std::ops::Deref;
+  use std::path::Path;
+  use std::path::PathBuf;
+  use std::rc::Rc;
+  use std::sync::Arc;
 
   use crate::core::Atom;
 
-  // #[test]
-  // fn test_well_known_atoms_have_correct_values() {
-  //   assert_eq!(Atom::EMPTY.as_str(), "");
-  //   assert_eq!(Atom::NORMAL.as_str(), "normal");
-  //   assert_eq!(Atom::KILL.as_str(), "kill");
-  //   assert_eq!(Atom::KILLED.as_str(), "killed");
-  //   assert_eq!(Atom::NOPROC.as_str(), "noproc");
-  //   assert_eq!(Atom::NOCONN.as_str(), "noconn");
-  //   assert_eq!(Atom::UNDEFINED.as_str(), "undefined");
-  // }
+  macro_rules! assert_equality {
+    ($atom:expr, $cmp1:expr, $cmp2:expr) => {{
+      ::std::assert_eq!($atom, $cmp1);
+      ::std::assert_ne!($atom, $cmp2);
+      ::std::assert_eq!($atom, &$cmp1);
+      ::std::assert_ne!($atom, &$cmp2);
+
+      ::std::assert_eq!($cmp1, $atom);
+      ::std::assert_ne!($cmp2, $atom);
+      ::std::assert_eq!(&$cmp1, $atom);
+      ::std::assert_ne!(&$cmp2, $atom);
+    }};
+  }
+
+  #[test]
+  fn test_well_known_atoms_have_correct_values() {
+    assert_eq!(Atom::EMPTY.as_str(), "");
+    assert_eq!(Atom::KILL.as_str(), "kill");
+    assert_eq!(Atom::KILLED.as_str(), "killed");
+    assert_eq!(Atom::NORMAL.as_str(), "normal");
+    assert_eq!(Atom::NOPROC.as_str(), "noproc");
+    assert_eq!(Atom::NOCONN.as_str(), "noconn");
+    assert_eq!(Atom::UNDEFINED.as_str(), "undefined");
+  }
 
   #[test]
   fn test_new() {
-    let atom: Atom = Atom::new("test");
-    assert_eq!(atom.as_str(), "test");
+    assert_eq!(Atom::new("test").as_str(), "test");
   }
 
   #[test]
   fn test_new_empty_string() {
-    let atom: Atom = Atom::new("");
-    assert_eq!(atom.as_str(), "");
-    assert_eq!(atom, Atom::EMPTY);
+    assert_eq!(Atom::new("").as_str(), "");
+    assert_eq!(Atom::new(""), Atom::EMPTY);
   }
 
   #[test]
   fn test_new_unicode() {
-    let atom: Atom = Atom::new("こんにちは");
-    assert_eq!(atom.as_str(), "こんにちは");
+    assert_eq!(Atom::new("こんにちは").as_str(), "こんにちは");
   }
 
   #[test]
   fn test_new_emoji() {
-    let atom: Atom = Atom::new("🦀");
-    assert_eq!(atom.as_str(), "🦀");
+    assert_eq!(Atom::new("🦀").as_str(), "🦀");
   }
 
   #[test]
@@ -638,18 +517,6 @@ mod tests {
 
     assert_eq!(a.into_slot(), b.into_slot());
     assert_ne!(a.into_slot(), c.into_slot());
-  }
-
-  #[test]
-  fn test_from_str() {
-    let atom: Atom = Atom::from("test");
-    assert_eq!(atom.as_str(), "test");
-  }
-
-  #[test]
-  fn test_from_string() {
-    let atom: Atom = Atom::from("test".to_string());
-    assert_eq!(atom.as_str(), "test");
   }
 
   #[test]
@@ -670,18 +537,23 @@ mod tests {
 
   #[test]
   fn test_display() {
-    let src: Atom = Atom::new("display_test");
+    let src: Atom = Atom::new("test");
     let fmt: String = format!("{src}");
 
-    assert_eq!(fmt, "display_test");
+    assert_eq!(fmt, "test");
   }
 
   #[test]
   fn test_debug_equals_display() {
-    let src: Atom = Atom::new("debug_test");
+    let src: Atom = Atom::new("test");
     let fmt: String = format!("{src}");
 
     assert_eq!(fmt, format!("{src:?}"));
+  }
+
+  #[test]
+  fn test_default() {
+    assert_eq!(<Atom as Default>::default(), Atom::EMPTY);
   }
 
   #[test]
@@ -692,14 +564,6 @@ mod tests {
 
     assert_eq!(a, b);
     assert_ne!(a, c);
-  }
-
-  #[test]
-  fn test_equality_with_str() {
-    let atom: Atom = Atom::new("test");
-
-    assert_eq!(atom, "test");
-    assert_ne!(atom, "other");
   }
 
   #[test]
@@ -714,15 +578,192 @@ mod tests {
   }
 
   #[test]
+  fn test_deref() {
+    let atom: Atom = Atom::new("test");
+    let data: &str = Deref::deref(&atom);
+
+    assert_eq!(atom.as_str(), data);
+  }
+
+  #[test]
+  fn test_as_ref() {
+    let atom: Atom = Atom::new("test");
+    let data: &str = AsRef::as_ref(&atom);
+    assert_eq!(atom.as_str(), data);
+
+    let data: &OsStr = AsRef::as_ref(&atom);
+    assert_eq!(atom.as_str(), data);
+  }
+
+  #[test]
   fn test_hash() {
     let mut set: HashSet<Atom> = HashSet::new();
 
-    set.insert(Atom::new("one"));
-    set.insert(Atom::new("two"));
-    set.insert(Atom::new("one"));
+    set.insert(Atom::new("a"));
+    set.insert(Atom::new("b"));
+    set.insert(Atom::new("a"));
 
     assert_eq!(set.len(), 2);
-    assert!(set.contains(&Atom::new("one")));
-    assert!(set.contains(&Atom::new("two")));
+    assert!(set.contains(&Atom::new("a")));
+    assert!(set.contains(&Atom::new("b")));
+  }
+
+  #[test]
+  fn test_from_into_str() {
+    let atom: Atom = Atom::from("test");
+    let data: &str = atom.into();
+
+    assert_eq!(data, "test");
+    assert_eq!(atom, Atom::from(data));
+  }
+
+  #[test]
+  fn test_from_into_string() {
+    let atom: Atom = Atom::from("test");
+    let data: String = atom.into();
+
+    assert_eq!(data, "test");
+    assert_eq!(atom, Atom::from(data));
+  }
+
+  #[test]
+  fn test_from_into_cow() {
+    let atom: Atom = Atom::from("test");
+    let data: Cow<'_, str> = atom.into();
+
+    assert_eq!(data, "test");
+    assert_eq!(atom, Atom::from(data));
+  }
+
+  #[test]
+  fn test_from_into_box() {
+    let atom: Atom = Atom::from("test");
+    let data: Box<str> = atom.into();
+
+    assert_eq!(data, Box::from("test"));
+    assert_eq!(atom, Atom::from(data));
+  }
+
+  #[test]
+  fn test_from_into_rc() {
+    let atom: Atom = Atom::from("test");
+    let data: Rc<str> = atom.into();
+
+    assert_eq!(data, Rc::from("test"));
+    assert_eq!(atom, Atom::from(data));
+  }
+
+  #[test]
+  fn test_from_into_arc() {
+    let atom: Atom = Atom::from("test");
+    let data: Arc<str> = atom.into();
+
+    assert_eq!(data, Arc::from("test"));
+    assert_eq!(atom, Atom::from(data));
+  }
+
+  #[test]
+  fn test_equality_str() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: &str = "test";
+    let cmp2: &str = "other";
+
+    assert_eq!(atom, *cmp1);
+    assert_ne!(atom, *cmp2);
+
+    assert_eq!(*cmp1, atom);
+    assert_ne!(*cmp2, atom);
+
+    assert_equality!(atom, cmp1, cmp2);
+  }
+
+  #[test]
+  fn test_equality_string() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: String = "test".to_owned();
+    let cmp2: String = "other".to_owned();
+
+    assert_equality!(atom, cmp1, cmp2);
+  }
+
+  #[test]
+  fn test_equality_cow_borrowed() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: Cow<'_, str> = Cow::Borrowed("test");
+    let cmp2: Cow<'_, str> = Cow::Borrowed("other");
+
+    assert_equality!(atom, cmp1, cmp2);
+  }
+
+  #[test]
+  fn test_equality_cow_owned() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: Cow<'_, str> = Cow::Owned("test".to_owned());
+    let cmp2: Cow<'_, str> = Cow::Owned("other".to_owned());
+
+    assert_equality!(atom, cmp1, cmp2);
+  }
+
+  #[test]
+  fn test_equality_box() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: Box<str> = Box::from("test");
+    let cmp2: Box<str> = Box::from("other");
+
+    assert_equality!(atom, cmp1, cmp2);
+  }
+
+  #[test]
+  fn test_equality_rc() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: Rc<str> = Rc::from("test");
+    let cmp2: Rc<str> = Rc::from("other");
+
+    assert_equality!(atom, cmp1, cmp2);
+  }
+
+  #[test]
+  fn test_equality_arc() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: Arc<str> = Arc::from("test");
+    let cmp2: Arc<str> = Arc::from("other");
+
+    assert_equality!(atom, cmp1, cmp2);
+  }
+
+  #[test]
+  fn test_equality_path() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: &Path = Path::new("test");
+    let cmp2: &Path = Path::new("other");
+
+    assert_equality!(atom, *cmp1, *cmp2);
+  }
+
+  #[test]
+  fn test_equality_path_buf() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: PathBuf = PathBuf::from("test");
+    let cmp2: PathBuf = PathBuf::from("other");
+
+    assert_equality!(atom, cmp1, cmp2);
+  }
+
+  #[test]
+  fn test_equality_os_str() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: &OsStr = OsStr::new("test");
+    let cmp2: &OsStr = OsStr::new("other");
+
+    assert_equality!(atom, *cmp1, *cmp2);
+  }
+
+  #[test]
+  fn test_equality_os_string() {
+    let atom: Atom = Atom::new("test");
+    let cmp1: OsString = OsString::from("test");
+    let cmp2: OsString = OsString::from("other");
+
+    assert_equality!(atom, cmp1, cmp2);
   }
 }

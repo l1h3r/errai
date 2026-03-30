@@ -1,0 +1,13 @@
+[package]
+name = "errai-benches"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bench]]
+name = "local_ref"
+harness = false
+
+[dev-dependencies]
+errai = { version = "=0.1", path = "..", default-features = false }
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support", "rayon"] }
